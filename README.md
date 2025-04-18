@@ -1,4 +1,4 @@
-# iperf3 Industrial Test Suite
+# iperf3 Test Suite
 
 **ipferf3-test.sh** is a comprehensive Bash script for automated iperf3 performance benchmarking in industrial or enterprise environments. It covers TCP/UDP over IPv4 and IPv6, DSCP marking, MTU probing, UDP saturation testing, and produces live console output as well as JSON, CSV, and summary reports.
 
