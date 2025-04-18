@@ -2,8 +2,6 @@
 
 **ipferf3-test.sh** is a comprehensive Bash script for automated iperf3 performance benchmarking in industrial or enterprise environments. It covers TCP/UDP over IPv4 and IPv6, DSCP marking, MTU probing, UDP saturation testing, and produces live console output as well as JSON, CSV, and summary reports.
 
----
-
 ## Features
 
 - **Transport & Addressing**: TCP and UDP tests over IPv4/IPv6.
@@ -21,8 +19,6 @@
   - **CSV**: Key metrics (throughput, loss, jitter, retransmits) aggregated.
   - **Console Dashboard**: Top-10 summary and per-protocol max metrics via `awk`.
 
----
-
 ## Requirements
 
 - **Bash** ≥ 4.0
@@ -35,8 +31,6 @@
 - **tee**
 
 All are typically available on modern Linux distributions.
-
----
 
 ## Installation
 
@@ -56,9 +50,7 @@ All are typically available on modern Linux distributions.
    sudo apt-get install iperf3 jq netcat bc
    ```
 
----
-
-## ⚙Configuration
+## Configuration
 
 Edit the top of `iperf-tests-enhanced.sh` to configure:
 
@@ -69,8 +61,6 @@ Edit the top of `iperf-tests-enhanced.sh` to configure:
 - **`DURATION`**: Test duration in seconds (default: 10s).
 - **`UDP_RATE_START`**: Starting UDP bandwidth (default: 10M).
 - **`LOSS_THRESHOLD`**: Saturation threshold % (default: 5%).
-
----
 
 ## Usage
 
@@ -84,8 +74,6 @@ Run the script directly:
 - A CSV summary is saved at `$HOME/logs/iperf/iperf_summary_<timestamp>.csv`.
 - Upon completion, a console dashboard shows the first 10 results and per-protocol max throughput/loss.
 
----
-
 ## Output Files
 
 All outputs are stored under `~/logs/iperf/` by default:
@@ -94,9 +82,7 @@ All outputs are stored under `~/logs/iperf/` by default:
 - **`iperf_summary_<TS>.csv`**: CSV with columns:
   `Protocol,Server,Port,DSCP,Scenario,Window,Throughput_Mbps,LossPct,Jitter_ms,Retransmits`
 
----
-
-## 🛠Troubleshooting
+## Troubleshooting
 
 - **`command not found: jq`**: Install `jq` via your package manager.
 - **Permission errors**: Ensure the script is executable and you have write access to `~/logs/iperf`.
