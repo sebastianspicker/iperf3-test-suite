@@ -2,7 +2,7 @@
 
 All notable changes to **iperf3 Test Suite**.
 
-## [v3.0] - 2025-05-01
+## [v3.0] - 2025-04-21
 ### Changed
 - Complete internal rework: refactored into modular helper functions (`h2m`, `spin`, `slot`, `csv`, `say`, etc.) with strict `set -euo pipefail` and cleanup traps.
 - Unified JSON, CSV, and summary generation into a single, timestamped workflow with temporary-file management and proper cleanup of background jobs.
