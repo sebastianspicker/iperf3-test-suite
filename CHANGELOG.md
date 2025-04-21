@@ -2,6 +2,36 @@
 
 All notable changes to **iperf3 Test Suite**.
 
+## [v3.0] - 2025-05-01
+### Changed
+- Complete internal rework: refactored into modular helper functions (`h2m`, `spin`, `slot`, `csv`, `say`, etc.) with strict `set -euo pipefail` and cleanup traps.
+- Unified JSON, CSV, and summary generation into a single, timestamped workflow with temporary-file management and proper cleanup of background jobs.
+- Auto-detection and fallback for IPv4/IPv6, with pre-flight reachability check (`ping` + `nc`) and dynamic MTU black‑hole probing (configurable sizes, disable flag).
+- Redesigned DSCP-to-TOS mapping using associative arrays, supporting CS0–CS7, EF, and AFxy classes.
+- Enhanced UDP saturation ramp-up with configurable start/max/step/loss-threshold parameters and automatic loop-break on threshold breach.
+- Improved parallelism: `-j` job pool, dynamic slot allocation, and live spinner (`-q` to suppress) for responsive CLI experience.
+- Updated summary output to include Top‑10 throughput and per-protocol maxima directly in the summary log.
+
+### Added
+- Comprehensive CLI options for port (`-p`), duration (`-t`), omit (`-s`), DSCP classes (`-d`), UDP parameters (`-u`), timeout (`-T`), MTU disable (`-N`), parallel jobs (`-j`), quiet mode (`-q`), and output directory (`-o`).
+- New CSV header and JSON schema with explicit field names (`test_no`, `protocol`, `direction`, `dscp`, `streams`, `window`, `bandwidth_mbps`, `throughput_*`, `jitter_ms`, `loss_percent`, `retransmits`, `status`).
+- Safety checks: validated numeric inputs, default fallbacks for missing `timeout`, Apple/Linux `ping` compatibility, and fail-safe on missing prerequisites.
+- Detailed `Known Bugs` section in `README.md` reflecting outstanding issues and future work.
+
+### Removed
+- Deprecated external Python report generator and previous summary scripts.
+- Legacy `record_summary()` and double-counting progress logic.
+- Hard-coded DSCP flags mapping; replaced by dynamic associative array.
+
+### Fixed
+- Eliminated JSON formatting error (no leading commas before objects).
+- Corrected `valid()` arithmetic evaluation and parameter checks.
+- Ensured proper reset of UDP loop variables and step fallback for non-positive values.
+- Addressed spinner inversion logic to respect quiet mode correctly.
+- Cleaned up temporary files in nested directories and improved trap handling.
+
+---
+
 ## [v2.7] - 2025-04-18
 ### Fixed
 - Corrected `record_summary()` function signature and removed stray backslashes.
