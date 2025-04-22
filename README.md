@@ -1,4 +1,3 @@
-```markdown
 # iperf3 Test Suite
 
 **iperf3-test.sh** is a comprehensive Bash script for automated performance benchmarking using iperf3. It supports TCP/UDP tests with DSCP marking, MTU‑blackhole probing, IPv4/IPv6 auto‑detection, UDP saturation ramp‑up, and outputs timestamped logs, TXT and CSV summaries.
@@ -168,4 +167,3 @@ Defaults are defined at the top of the script but can be overridden via CLI opti
 7. **Loss of per‑test JSON**: aggregated JSON output not yet implemented.  
 
 *Last updated: April 2025*  
-```
