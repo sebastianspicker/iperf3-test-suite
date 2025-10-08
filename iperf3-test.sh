@@ -153,7 +153,7 @@ if (( MTU_CHECK )); then
     | tee -a "$SUMMARY" "$OUTFILE"
 
   P4="ping -c1 -M do"
-  P6="ping6 -c1"
+  P6="ping -6 -c1"
   for SZ in "${MTU_SIZES[@]}"; do
     if ! eval "$([[ $ipv == 6 ]] && echo \$P6 || echo \$P4) -s $SZ $TARGET" &>/dev/null; then
       BH=1
@@ -272,7 +272,7 @@ for d in "${DSCP_CLASSES[@]}"; do
       slot
       TEST_NO=$((TEST_NO+1))
       res=$(run_test "$TEST_NO" UDP "$dir" "$d" 1 "" "${cur}M" sat "$tos")
-      awk "BEGIN{exit !(\$res>$UDP_LOSS_THRESHOLD)}" && break
+      awk -v x="$res" -v thr="$UDP_LOSS_THRESHOLD" 'BEGIN{exit !(x>thr)}' && break
       cur=$((cur+step))
     done
     cur=$(h2m "$UDP_START_BW")
