@@ -186,13 +186,15 @@ run_test(){
   (( ipv==6 )) && args+=( -6 )
   if [[ $proto == TCP ]]; then
     [[ $dir == RX ]] && args+=( -R )
-    [[ $dir == BD ]] && args+=( --bidir )
+    [[ $dir == BD && $BIDIR == 1 ]] && args+=( --bidir )
     args+=( -P "$streams" )
     [[ $win != default ]] && args+=( -w "$win" )
   else
     args+=( -u -b "$bw" )
+    [[ $dir == RX ]] && args+=( -R )
+    [[ $dir == BD && $BIDIR == 1 ]] && args+=( --bidir )
   fi
-
+  
   local tmp_out
   tmp_out=$(mktemp); TMP_FILES+=("$tmp_out")
   stdbuf -oL iperf3 "${args[@]}" 2>&1 \
