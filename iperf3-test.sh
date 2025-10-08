@@ -88,12 +88,12 @@ BIDIR=$(( IPERF_MAJOR>3 || (IPERF_MAJOR==3 && IPERF_MINOR>=7) ))
 
 ##### DSCP → TOS map #########################################################
 declare -A TOS
-for i in {0..7}; do TOS[CS$i]=$((i*8<<2)); done
+for i in {0..7}; do dscp=$((i*8)); TOS[CS$i]=$((dscp<<2)); done
 TOS[EF]=$((46<<2))
-for k in 1 2 3 4; do
-  for j in 1 2 3; do
-    d=$(( (k+1)*8 + (j-1)*2 ))
-    TOS[AF${k}${j}]=$((d<<2))
+for x in 1 2 3 4; do
+  for y in 1 2 3; do
+    dscp=$((8*x + 2*y))         # AFx1=10, AFx2=12, AFx3=14, ...
+    TOS[AF${x}${y}]=$((dscp<<2)) # ToS/TClass byte = DSCP << 2
   done
 done
 
