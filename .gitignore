@@ -1,0 +1,14 @@
+.DS_Store
+.vscode/
+
+# Pester / test artifacts
+testResults.xml
+TestResults/
+artifacts/
+
+# Output artifacts
+logs/
+*.csv
+*.json
+*.log
+

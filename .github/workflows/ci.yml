@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install modules
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module PSScriptAnalyzer,Pester -Scope CurrentUser -Force -Confirm:$false
+
+      - name: ScriptAnalyzer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-ScriptAnalyzer -Path . -Recurse
+
+      - name: Pester
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-Pester
+

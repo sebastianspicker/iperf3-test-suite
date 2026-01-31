@@ -2,6 +2,12 @@
 
 All notable changes to **iperf3 Test Suite**.
 
+## [Unreleased] – 2026-01-31
+
+### Changed
+- Ported/rewritten the test runner as a PowerShell 7+ implementation (`iPerf3Test.ps1` + `src/Iperf3TestSuite.psm1`).
+- Added offline Pester coverage and CI-friendly quality gates (ScriptAnalyzer + Pester).
+
 ## [v3.1] – 2025-04-22
 
 ### Added
@@ -143,4 +149,3 @@ All notable changes to **iperf3 Test Suite**.
 ### Initial Release
 - Basic automation of iperf3 TCP & UDP tests.
 - JSON logging and simple console summaries.
-
