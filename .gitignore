@@ -1,14 +1,39 @@
 .DS_Store
+Thumbs.db
+Desktop.ini
 .vscode/
+.idea/
+.vs/
+*.code-workspace
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.swp
+*.swo
+*.swx
+*.tmp
+*.bak
+*.orig
 
 # Pester / test artifacts
 testResults.xml
 TestResults/
 artifacts/
+coverage/
 
 # Output artifacts
 logs/
 *.csv
 *.json
 *.log
+*.nupkg
 
+# docs (local findings/logs/decisions)
+.vscode
+DECISIONS.md
+FINDINGS.md
+LOG.md
+REFACTOR_PLAN.md
+PHYSICS_AUDIT.md
+validation.md

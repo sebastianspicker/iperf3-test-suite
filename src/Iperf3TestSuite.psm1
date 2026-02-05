@@ -185,11 +185,34 @@ function Get-JsonSubstringOrNull {
     [string]$Text
   )
 
-  $first = $Text.IndexOf('{')
-  $last = $Text.LastIndexOf('}')
+  if ([string]::IsNullOrWhiteSpace($Text)) {
+    return $null
+  }
 
-  if ($first -ge 0 -and $last -gt $first) {
-    return $Text.Substring($first, ($last - $first + 1))
+  $startMatches = [regex]::Matches($Text, '\{')
+  $endMatches = [regex]::Matches($Text, '\}')
+
+  if ($startMatches.Count -eq 0 -or $endMatches.Count -eq 0) {
+    return $null
+  }
+
+  $starts = @($startMatches | ForEach-Object { $_.Index })
+  $ends = @($endMatches | ForEach-Object { $_.Index })
+
+  foreach ($s in $starts) {
+    for ($i = $ends.Count - 1; $i -ge 0; $i--) {
+      $e = $ends[$i]
+      if ($e -le $s) { break }
+
+      $candidate = $Text.Substring($s, ($e - $s + 1))
+      try {
+        $null = ConvertFrom-Json -InputObject $candidate -ErrorAction Stop
+        return $candidate
+      }
+      catch {
+        continue
+      }
+    }
   }
 
   return $null
@@ -486,14 +509,12 @@ function Invoke-Iperf3TestSuite {
 
     $stack = Test-Reachability -ComputerName $Target -Mode $IpVersion
     if ($stack -eq 'None') {
-      Write-Warning "ICMP reachability to '$Target' failed; aborting."
-      return
+      throw "ICMP reachability to '$Target' failed; aborting."
     }
 
     $net = Test-TcpPortAndTrace -ComputerName $Target -Port $Port -Hops 5
     if (-not $net.Tcp.TcpTestSucceeded) {
-      Write-Warning "TCP port $Port on '$Target' not reachable; aborting."
-      return
+      throw "TCP port $Port on '$Target' not reachable; aborting."
     }
 
     $mtuFails = @()
@@ -642,7 +663,7 @@ function Invoke-Iperf3TestSuite {
         PingSucceeded    = $net.Tcp.PingSucceeded
         TraceRoute       = $net.Trace.TraceRoute
       }
-      Results        = @($allResults)
+      Results        = $allResults.ToArray()
     }
 
     $final | ConvertTo-Json -Depth 10 | Set-Content -Path $jsonPath -Encoding UTF8

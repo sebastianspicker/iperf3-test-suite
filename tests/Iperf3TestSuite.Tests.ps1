@@ -61,8 +61,29 @@ Describe 'Iperf3TestSuite helpers' {
   Context 'JSON extraction' {
     It 'extracts the JSON substring when surrounded by text' {
       InModuleScope Iperf3TestSuite {
-        $s = 'banner {\"a\":1} trailer'
-        Get-JsonSubstringOrNull -Text $s | Should -Be '{\"a\":1}'
+        $s = 'banner {"a":1} trailer'
+        Get-JsonSubstringOrNull -Text $s | Should -Be '{"a":1}'
+      }
+    }
+
+    It 'skips invalid braces and returns the first valid JSON' {
+      InModuleScope Iperf3TestSuite {
+        $s = 'prefix {notjson} mid {"a":1} trailer'
+        Get-JsonSubstringOrNull -Text $s | Should -Be '{"a":1}'
+      }
+    }
+
+    It 'handles braces inside JSON strings' {
+      InModuleScope Iperf3TestSuite {
+        $s = 'banner {"a":"{x}"} trailer'
+        Get-JsonSubstringOrNull -Text $s | Should -Be '{"a":"{x}"}'
+      }
+    }
+
+    It 'returns null when braces exist but no valid JSON' {
+      InModuleScope Iperf3TestSuite {
+        $s = 'prefix {not json} trailer'
+        Get-JsonSubstringOrNull -Text $s | Should -Be $null
       }
     }
 
@@ -119,6 +140,156 @@ Describe 'Iperf3TestSuite helpers' {
           'Jitter_ms',
           'Role'
         )
+      }
+    }
+  }
+
+  Context 'Invoke-Iperf3 args' {
+    It 'adds -R for TCP RX' {
+      InModuleScope Iperf3TestSuite {
+        $script:captured = $null
+        Mock iperf3 {
+          $script:captured = $args
+          $global:LASTEXITCODE = 0
+          return '{"end":{}}'
+        }
+
+        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
+        $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 `
+          -Proto 'TCP' -Dir 'RX' -Caps $caps
+
+        $script:captured | Should -Contain '-R'
+      }
+    }
+
+    It 'adds --bidir for TCP BD when supported' {
+      InModuleScope Iperf3TestSuite {
+        $script:captured = $null
+        Mock iperf3 {
+          $script:captured = $args
+          $global:LASTEXITCODE = 0
+          return '{"end":{}}'
+        }
+
+        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
+        $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 `
+          -Proto 'TCP' -Dir 'BD' -Caps $caps
+
+        $script:captured | Should -Contain '--bidir'
+      }
+    }
+
+    It 'adds -u and -b for UDP' {
+      InModuleScope Iperf3TestSuite {
+        $script:captured = $null
+        Mock iperf3 {
+          $script:captured = $args
+          $global:LASTEXITCODE = 0
+          return '{"end":{}}'
+        }
+
+        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
+        $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 `
+          -Proto 'UDP' -Dir 'TX' -UdpBw '5M' -Caps $caps
+
+        $script:captured | Should -Contain '-u'
+        $script:captured | Should -Contain '-b'
+        $script:captured | Should -Contain '5M'
+      }
+    }
+  }
+
+  Context 'Failure handling' {
+    It 'throws when reachability fails' {
+      InModuleScope Iperf3TestSuite {
+        Mock Get-Command { [pscustomobject]@{ Name = 'iperf3' } } -ParameterFilter { $Name -eq 'iperf3' }
+        Mock Get-Iperf3Capability { [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true } }
+        Mock Test-Reachability { 'None' }
+        Mock Test-TcpPortAndTrace { throw 'Should not be called' }
+
+        Should -Throw -ActualValue { Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet } -ExpectedMessage "ICMP reachability*"
+      }
+    }
+
+    It 'throws when TCP port is not reachable' {
+      InModuleScope Iperf3TestSuite {
+        Mock Get-Command { [pscustomobject]@{ Name = 'iperf3' } } -ParameterFilter { $Name -eq 'iperf3' }
+        Mock Get-Iperf3Capability { [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true } }
+        Mock Test-Reachability { 'IPv4' }
+        Mock Test-TcpPortAndTrace {
+          [pscustomobject]@{
+            Tcp   = [pscustomobject]@{ TcpTestSucceeded = $false }
+            Trace = $null
+          }
+        }
+
+        Should -Throw -ActualValue { Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet } -ExpectedMessage "TCP port*"
+      }
+    }
+  }
+
+  Context 'UDP saturation loop' {
+    It 'stops when loss exceeds threshold' {
+      InModuleScope Iperf3TestSuite {
+        $script:udpBws = New-Object System.Collections.Generic.List[string]
+
+        Mock Get-Command { [pscustomobject]@{ Name = 'iperf3' } } -ParameterFilter { $Name -eq 'iperf3' }
+        Mock Get-Iperf3Capability { [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true } }
+        Mock Test-Reachability { 'IPv4' }
+        Mock Test-TcpPortAndTrace {
+          [pscustomobject]@{
+            Tcp   = [pscustomobject]@{ TcpTestSucceeded = $true; RemoteAddress = '127.0.0.1'; PingSucceeded = $true }
+            Trace = [pscustomobject]@{ TraceRoute = @() }
+          }
+        }
+
+        Mock Invoke-Iperf3 {
+          param(
+            [string]$Server,
+            [int]$Port,
+            [string]$Stack,
+            [int]$Duration,
+            [int]$Omit,
+            [int]$Tos,
+            [string]$Proto,
+            [string]$Dir,
+            [int]$Streams,
+            [string]$Win,
+            [string]$UdpBw,
+            [int]$ConnectTimeoutMs,
+            [pscustomobject]$Caps
+          )
+
+          $null = $Server, $Port, $Stack, $Duration, $Omit, $Tos, $Dir, $Streams, $Win, $ConnectTimeoutMs, $Caps
+
+          if ($Proto -eq 'UDP') {
+            $script:udpBws.Add($UdpBw) | Out-Null
+            $json = [pscustomobject]@{
+              end = [pscustomobject]@{
+                sum_sent     = [pscustomobject]@{ bits_per_second = 1000000; lost_percent = 10 }
+                sum_received = [pscustomobject]@{ bits_per_second = 900000 }
+                sum          = [pscustomobject]@{ lost_percent = 10; jitter_ms = 1.0 }
+              }
+            }
+          }
+          else {
+            $json = [pscustomobject]@{ end = $null }
+          }
+
+          return [pscustomobject]@{
+            Args     = @()
+            ExitCode = 0
+            RawLines = @()
+            RawText  = ''
+            Json     = $json
+          }
+        }
+
+        $null = Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet -DisableMtuProbe `
+          -TcpStreams @(1) -TcpWindows @('default') -DscpClasses @('CS0') `
+          -UdpStart '1M' -UdpMax '2M' -UdpStep '1M' -UdpLossThreshold 1.0
+
+        $script:udpBws | Where-Object { $_ -eq '2M' } | Should -BeNullOrEmpty
       }
     }
   }

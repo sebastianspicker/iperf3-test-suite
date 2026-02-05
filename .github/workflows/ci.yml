@@ -4,17 +4,49 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Secret scan (lightweight)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $patterns = @(
+            '-----BEGIN (RSA|DSA|EC|OPENSSH) PRIVATE KEY-----',
+            'AKIA[0-9A-Z]{16}',
+            'ASIA[0-9A-Z]{16}',
+            'ghp_[A-Za-z0-9]{36}',
+            'github_pat_[A-Za-z0-9_]{22,}',
+            'xox[baprs]-[A-Za-z0-9-]{10,48}'
+          )
+          $files = Get-ChildItem -Recurse -File -Force | Where-Object { $_.FullName -notlike '*\.git\*' }
+          $hitCount = 0
+          foreach ($pattern in $patterns) {
+            $hits = $files | Select-String -Pattern $pattern
+            if ($hits) { $hitCount += $hits.Count }
+          }
+          if ($hitCount -gt 0) {
+            Write-Error "Potential secrets detected. Review locally; output suppressed."
+          }
 
       - name: Install modules
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Install-Module PSScriptAnalyzer,Pester -Scope CurrentUser -Force -Confirm:$false
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Scope CurrentUser -Force -Confirm:$false
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -Confirm:$false
+
+      - name: Module inventory (SCA baseline)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-InstalledModule PSScriptAnalyzer,Pester | Select-Object Name, Version, Repository | Format-Table -AutoSize
 
       - name: ScriptAnalyzer
         shell: pwsh
@@ -27,4 +59,3 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Invoke-Pester
-
