@@ -18,6 +18,7 @@ function Initialize-PowerShellGallery {
   if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
     Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
   }
+  Import-PackageProvider -Name NuGet -Force -ErrorAction SilentlyContinue | Out-Null
 
   $psgallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
   if (-not $psgallery) {
@@ -40,7 +41,7 @@ function Install-RequiredModule {
 
   $installed = Get-Module -ListAvailable -Name $Name | Where-Object { $_.Version -eq [version]$Version }
   if (-not $installed) {
-    Install-Module $Name -RequiredVersion $Version -Scope CurrentUser -Force -Confirm:$false
+    Install-Module $Name -RequiredVersion $Version -Repository PSGallery -Scope CurrentUser -Force -AllowClobber -AcceptLicense -Confirm:$false
   }
 }
 
@@ -48,7 +49,15 @@ Initialize-PowerShellGallery
 Install-RequiredModule -Name PSScriptAnalyzer -Version $PsscriptAnalyzerVersion
 Install-RequiredModule -Name Pester -Version $PesterVersion
 
-Get-InstalledModule PSScriptAnalyzer,Pester | Select-Object Name, Version, Repository | Format-Table -AutoSize
+$installedModules = Get-Module -ListAvailable -Name PSScriptAnalyzer, Pester |
+  Sort-Object Name, Version -Unique |
+  Select-Object Name, Version, Path
+
+if (-not $installedModules -or ($installedModules | Where-Object { $_.Name -eq 'PSScriptAnalyzer' }).Count -eq 0 -or ($installedModules | Where-Object { $_.Name -eq 'Pester' }).Count -eq 0) {
+  throw 'Required modules not found after installation attempt.'
+}
+
+$installedModules | Format-Table -AutoSize
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Invoke-ScriptAnalyzer -Path $repoRoot -Recurse

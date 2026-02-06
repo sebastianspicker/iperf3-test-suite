@@ -21,4 +21,4 @@ GitHub Actions API check on **2026-02-06** found **1** run and **0** failures.
 ## Failure Table
 | Workflow | Failure(s) | Root Cause | Fix Plan | Risk | Verification |
 | --- | --- | --- | --- | --- | --- |
-| CI | `Install-Module` failed: `Get-Package` no match for `PSScriptAnalyzer` | PSGallery/NuGet provider not initialized on runner | Bootstrap PSGallery + NuGet provider before module install | Low | Re-run CI on `push`/`pull_request` |
+| CI | `Get-Package` no match for `PSScriptAnalyzer` | PackageManagement/PSGallery initialization inconsistent on runner; `Get-InstalledModule` failed | Bootstrap PSGallery + NuGet provider, avoid `Get-InstalledModule` and validate modules via `Get-Module -ListAvailable` | Low | Re-run CI on `push`/`pull_request` |
