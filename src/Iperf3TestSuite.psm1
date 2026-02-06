@@ -252,7 +252,8 @@ function Invoke-Iperf3 {
     [ValidateRange(1000, 300000)]
     [int]$ConnectTimeoutMs = 60000,
     [Parameter(Mandatory)]
-    [pscustomobject]$Caps
+    [pscustomobject]$Caps,
+    [scriptblock]$Runner
   )
 
   $iperfArgs = @('-c', $Server, '-p', $Port, '-t', $Duration, '-O', $Omit, '-J', '--connect-timeout', $ConnectTimeoutMs)
@@ -277,7 +278,12 @@ function Invoke-Iperf3 {
     }
   }
 
-  $rawLines = & iperf3 @iperfArgs 2>&1
+  if ($null -ne $Runner) {
+    $rawLines = & $Runner -IperfArgs $iperfArgs 2>&1
+  }
+  else {
+    $rawLines = & iperf3 @iperfArgs 2>&1
+  }
   $rawText = $rawLines | Out-String
 
   $jsonObj = $null

@@ -21,4 +21,4 @@ GitHub Actions API check on **2026-02-06** found **1** run and **0** failures.
 ## Failure Table
 | Workflow | Failure(s) | Root Cause | Fix Plan | Risk | Verification |
 | --- | --- | --- | --- | --- | --- |
-| CI | `Get-Package` no match for `PSScriptAnalyzer` | PackageManagement/PSGallery initialization inconsistent on runner; `Get-InstalledModule` failed | Bootstrap PSGallery + NuGet provider, avoid `Get-InstalledModule` and validate modules via `Get-Module -ListAvailable` | Low | Re-run CI on `push`/`pull_request` |
+| CI | Pester tests failing in `Invoke-Iperf3 args` | External `iperf3` invocation not mockable reliably in CI | Add `-Runner` injection to `Invoke-Iperf3` and use in tests for deterministic args capture | Low | Re-run CI on `push`/`pull_request` |

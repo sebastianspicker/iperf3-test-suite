@@ -146,56 +146,59 @@ Describe 'Iperf3TestSuite helpers' {
 
   Context 'Invoke-Iperf3 args' {
     It 'adds -R for TCP RX' {
-      InModuleScope Iperf3TestSuite {
+      $captured = InModuleScope Iperf3TestSuite {
         $script:captured = $null
-        Mock iperf3 {
-          $script:captured = $args
+        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
+        $runner = {
+          param([string[]]$IperfArgs)
+          $script:captured = $IperfArgs
           $global:LASTEXITCODE = 0
           return '{"end":{}}'
         }
-
-        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
         $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 `
-          -Proto 'TCP' -Dir 'RX' -Caps $caps
-
-        $script:captured | Should -Contain '-R'
+          -Proto 'TCP' -Dir 'RX' -Caps $caps -Runner $runner
+        return $script:captured
       }
+
+      $captured | Should -Contain '-R'
     }
 
     It 'adds --bidir for TCP BD when supported' {
-      InModuleScope Iperf3TestSuite {
+      $captured = InModuleScope Iperf3TestSuite {
         $script:captured = $null
-        Mock iperf3 {
-          $script:captured = $args
+        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
+        $runner = {
+          param([string[]]$IperfArgs)
+          $script:captured = $IperfArgs
           $global:LASTEXITCODE = 0
           return '{"end":{}}'
         }
-
-        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
         $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 `
-          -Proto 'TCP' -Dir 'BD' -Caps $caps
-
-        $script:captured | Should -Contain '--bidir'
+          -Proto 'TCP' -Dir 'BD' -Caps $caps -Runner $runner
+        return $script:captured
       }
+
+      $captured | Should -Contain '--bidir'
     }
 
     It 'adds -u and -b for UDP' {
-      InModuleScope Iperf3TestSuite {
+      $captured = InModuleScope Iperf3TestSuite {
         $script:captured = $null
-        Mock iperf3 {
-          $script:captured = $args
+        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
+        $runner = {
+          param([string[]]$IperfArgs)
+          $script:captured = $IperfArgs
           $global:LASTEXITCODE = 0
           return '{"end":{}}'
         }
-
-        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
         $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 `
-          -Proto 'UDP' -Dir 'TX' -UdpBw '5M' -Caps $caps
-
-        $script:captured | Should -Contain '-u'
-        $script:captured | Should -Contain '-b'
-        $script:captured | Should -Contain '5M'
+          -Proto 'UDP' -Dir 'TX' -UdpBw '5M' -Caps $caps -Runner $runner
+        return $script:captured
       }
+
+      $captured | Should -Contain '-u'
+      $captured | Should -Contain '-b'
+      $captured | Should -Contain '5M'
     }
   }
 
