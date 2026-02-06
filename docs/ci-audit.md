@@ -16,8 +16,9 @@
 ## Last Failed Runs
 GitHub Actions API check on **2026-02-06** found **1** run and **0** failures.
 - Latest run: `CI` on `push`, run id `21547825292`, conclusion `success` (2026-01-31T17:02:35Z)
+- User-provided log snippet on **2026-02-06** indicates a failure in `Quality Gates (Windows)` during module install.
 
 ## Failure Table
 | Workflow | Failure(s) | Root Cause | Fix Plan | Risk | Verification |
 | --- | --- | --- | --- | --- | --- |
-| CI | None observed | N/A | N/A | N/A | Latest run `21547825292` successful |
+| CI | `Install-Module` failed: `Get-Package` no match for `PSScriptAnalyzer` | PSGallery/NuGet provider not initialized on runner | Bootstrap PSGallery + NuGet provider before module install | Low | Re-run CI on `push`/`pull_request` |

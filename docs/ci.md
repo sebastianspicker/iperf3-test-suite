@@ -10,6 +10,7 @@
 Prerequisites:
 - PowerShell 7+
 - Access to PowerShell Gallery (`Install-Module`)
+  - The script bootstraps PSGallery and the NuGet provider automatically.
 
 Run the same checks as CI:
 
