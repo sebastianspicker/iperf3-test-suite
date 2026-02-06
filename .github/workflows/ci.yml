@@ -2,16 +2,48 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  quality-gates:
+    name: Quality Gates (Windows)
     runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write
+    env:
+      PSSCRIPTANALYZER_VERSION: '1.24.0'
+      PESTER_VERSION: '5.7.1'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Resolve PowerShell module cache
+        id: psmodules
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $moduleRoot = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\Modules'
+          New-Item -ItemType Directory -Path $moduleRoot -Force | Out-Null
+          "path=$moduleRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Restore PowerShell module cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ steps.psmodules.outputs.path }}
+          key: psmodules-${{ runner.os }}-psa-${{ env.PSSCRIPTANALYZER_VERSION }}-pester-${{ env.PESTER_VERSION }}
 
       - name: Secret scan (lightweight)
         shell: pwsh
@@ -35,27 +67,8 @@ jobs:
             Write-Error "Potential secrets detected. Review locally; output suppressed."
           }
 
-      - name: Install modules
+      - name: Quality gates (ScriptAnalyzer + Pester)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Scope CurrentUser -Force -Confirm:$false
-          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -Confirm:$false
-
-      - name: Module inventory (SCA baseline)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Get-InstalledModule PSScriptAnalyzer,Pester | Select-Object Name, Version, Repository | Format-Table -AutoSize
-
-      - name: ScriptAnalyzer
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Invoke-ScriptAnalyzer -Path . -Recurse
-
-      - name: Pester
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Invoke-Pester
+          pwsh -NoLogo -NoProfile -File .\\scripts\\Invoke-QualityGates.ps1

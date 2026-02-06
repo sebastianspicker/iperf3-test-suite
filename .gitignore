@@ -21,6 +21,18 @@ testResults.xml
 TestResults/
 artifacts/
 coverage/
+test-results/
+pester-*.xml
+*.trx
+*.clixml
+*.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+node_modules/
+dist/
+.terraform/
 
 # Output artifacts
 logs/
