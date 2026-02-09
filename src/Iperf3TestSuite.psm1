@@ -24,7 +24,7 @@ function Get-TosFromDscpClass {
       return ($dscp -shl 2)
     }
     default {
-      return 0
+      throw "Unknown DSCP class: '$Class'. Expected CS0-CS7, EF, or AFxy (e.g. AF11, AF41)."
     }
   }
 }
@@ -82,13 +82,15 @@ function Test-Reachability {
   catch {
     if ($Mode -eq 'IPv4' -or $Mode -eq 'Auto') {
       $null = & ping.exe -4 -n 1 $ComputerName 2>$null
-      if ($LASTEXITCODE -eq 0) {
+      $pingExit = $LASTEXITCODE
+      if ($pingExit -eq 0) {
         return 'IPv4'
       }
     }
     if ($Mode -eq 'IPv6' -or $Mode -eq 'Auto') {
       $null = & ping.exe -6 -n 1 $ComputerName 2>$null
-      if ($LASTEXITCODE -eq 0) {
+      $pingExit = $LASTEXITCODE
+      if ($pingExit -eq 0) {
         return 'IPv6'
       }
     }
@@ -110,8 +112,16 @@ function Test-TcpPortAndTrace {
     [int]$Hops = 5
   )
 
-  $tcp = Test-NetConnection -ComputerName $ComputerName -Port $Port -InformationLevel Detailed
-  $trace = Test-NetConnection -ComputerName $ComputerName -TraceRoute -Hops $Hops -InformationLevel Detailed
+  try {
+    $tcp = Test-NetConnection -ComputerName $ComputerName -Port $Port -InformationLevel Detailed -ErrorAction Stop
+    $trace = Test-NetConnection -ComputerName $ComputerName -TraceRoute -Hops $Hops -InformationLevel Detailed -ErrorAction Stop
+  }
+  catch {
+    return [pscustomobject]@{
+      Tcp   = $null
+      Trace = $null
+    }
+  }
 
   [pscustomobject]@{
     Tcp   = $tcp
@@ -136,14 +146,12 @@ function Test-MtuPayload {
   foreach ($sz in $Sizes) {
     if ($Stack -eq 'IPv4') {
       $null = & ping.exe -4 -n 1 -f -l $sz $ComputerName 2>$null
-      $ok = ($LASTEXITCODE -eq 0)
     }
     else {
       $null = & ping.exe -6 -n 1 -l $sz $ComputerName 2>$null
-      $ok = ($LASTEXITCODE -eq 0)
     }
-
-    if (-not $ok) {
+    $pingExit = $LASTEXITCODE
+    if ($pingExit -ne 0) {
       [void]$fails.Add($sz)
     }
   }
@@ -157,6 +165,11 @@ function Get-Iperf3Capability {
   param()
 
   $verText = (& iperf3 --version 2>&1 | Select-Object -First 1)
+  $capExit = $LASTEXITCODE
+  if ($capExit -ne 0) {
+    $verText = "iperf3 --version failed (exit code $capExit): $verText"
+  }
+
   $m = [regex]::Match($verText, '\b([0-9]+)\.([0-9]+)\b')
 
   $bidir = $false
@@ -284,6 +297,7 @@ function Invoke-Iperf3 {
   else {
     $rawLines = & iperf3 @iperfArgs 2>&1
   }
+  $exitCode = $LASTEXITCODE
   $rawText = $rawLines | Out-String
 
   $jsonObj = $null
@@ -297,8 +311,6 @@ function Invoke-Iperf3 {
       $jsonObj = $null
     }
   }
-
-  $exitCode = $LASTEXITCODE
 
   return [pscustomobject]@{
     Args     = $iperfArgs
@@ -519,7 +531,7 @@ function Invoke-Iperf3TestSuite {
     }
 
     $net = Test-TcpPortAndTrace -ComputerName $Target -Port $Port -Hops 5
-    if (-not $net.Tcp.TcpTestSucceeded) {
+    if (-not $net -or -not $net.Tcp -or -not $net.Tcp.TcpTestSucceeded) {
       throw "TCP port $Port on '$Target' not reachable; aborting."
     }
 
@@ -606,10 +618,13 @@ function Invoke-Iperf3TestSuite {
       $max = ConvertTo-MbitPerSecond $UdpMax
       $step = [math]::Max((ConvertTo-MbitPerSecond $UdpStep), 1)
       if ($max -lt $cur) { $max = $cur }
+      $maxUdpIterations = 1000
 
       foreach ($dir in @('TX', 'RX')) {
         $bw = $cur
-        while ($bw -le $max) {
+        $iterations = 0
+        while ($bw -le $max -and $iterations -lt $maxUdpIterations) {
+          $iterations++
           $testNo++
           $bwStr = '{0}M' -f $bw
 
@@ -640,6 +655,9 @@ function Invoke-Iperf3TestSuite {
               -ThrTxMbps $m.TxMbps -RetrTx $null -ThrRxMbps $m.RxMbps -LossTxPct $m.LossPct -JitterMs $m.JitterMs -Role 'end')
           ) | Out-Null
 
+          if ($run.ExitCode -ne 0 -and $null -eq $run.Json) {
+            break
+          }
           if ($null -ne $m.LossPct -and [double]$m.LossPct -gt $UdpLossThreshold) {
             break
           }
@@ -667,7 +685,7 @@ function Invoke-Iperf3TestSuite {
         TcpTestSucceeded = $net.Tcp.TcpTestSucceeded
         RemoteAddress    = $net.Tcp.RemoteAddress
         PingSucceeded    = $net.Tcp.PingSucceeded
-        TraceRoute       = $net.Trace.TraceRoute
+        TraceRoute       = if ($net.Trace) { $net.Trace.TraceRoute } else { $null }
       }
       Results        = $allResults.ToArray()
     }

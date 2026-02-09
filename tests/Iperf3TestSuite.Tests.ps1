@@ -25,9 +25,9 @@ Describe 'Iperf3TestSuite helpers' {
       }
     }
 
-    It 'maps unknown values to 0' {
+    It 'throws on unknown DSCP class' {
       InModuleScope Iperf3TestSuite {
-        Get-TosFromDscpClass -Class 'NOPE' | Should -Be 0
+        { Get-TosFromDscpClass -Class 'NOPE' } | Should -Throw "Unknown DSCP class*"
       }
     }
   }
