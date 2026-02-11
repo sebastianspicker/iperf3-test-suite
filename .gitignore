@@ -3,6 +3,7 @@ Thumbs.db
 Desktop.ini
 .vscode/
 .cursor/
+.codex/
 .idea/
 .vs/
 *.code-workspace
