@@ -43,11 +43,5 @@ logs/
 *.log
 *.nupkg
 
-# docs (local findings/logs/decisions)
+# Local / scratch docs (do not commit)
 .vscode
-DECISIONS.md
-FINDINGS.md
-LOG.md
-REFACTOR_PLAN.md
-PHYSICS_AUDIT.md
-validation.md

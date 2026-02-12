@@ -15,12 +15,15 @@ Windows-focused iperf3 client test runner for PowerShell 7+. It executes a TCP/U
 - iperf3 client installed on the runner host
 - Reachable iperf3 server (`iperf3 -s`) on the target
 
-## Repo Layout
-- `iPerf3Test.ps1`: CLI entrypoint (wraps the module)
-- `src/Iperf3TestSuite.psm1`: implementation module
-- `src/Iperf3TestSuite.psd1`: module manifest
-- `tests/Iperf3TestSuite.Tests.ps1`: offline Pester tests
-- `scripts/Invoke-QualityGates.ps1`: ScriptAnalyzer + Pester
+## Repo layout
+- `iPerf3Test.ps1` — CLI entrypoint (wraps the module)
+- `src/Iperf3TestSuite.psm1` — implementation module
+- `src/Iperf3TestSuite.psd1` — module manifest
+- `tests/Iperf3TestSuite.Tests.ps1` — offline Pester tests
+- `scripts/Invoke-QualityGates.ps1` — ScriptAnalyzer + Pester
+- `scripts/ci-local.sh` — run same checks as CI (requires Bash: WSL, Git Bash, or macOS/Linux)
+- `BUGS_AND_FIXES.md` — known issues and required fixes (use for opening GitHub issues)
+- `CHANGELOG.md` — version history
 
 ## Quickstart
 
@@ -122,6 +125,19 @@ Dependency inventory (PowerShell modules):
 pwsh -NoProfile -Command "Get-InstalledModule PSScriptAnalyzer,Pester | Select-Object Name, Version, Repository | Format-Table -AutoSize"
 ```
 
+## Validation (build / run / test)
+No build step (PowerShell module + script only). Use these to verify the repo:
+
+| Action | Command |
+|--------|---------|
+| **Lint** | `pwsh -NoProfile -Command "Invoke-ScriptAnalyzer -Path . -Recurse"` |
+| **Tests** | `pwsh -NoProfile -Command "Invoke-Pester"` |
+| **Quality gates** (lint + tests; installs modules if missing) | `pwsh -NoProfile -File .\scripts\Invoke-QualityGates.ps1` |
+| **Same as CI** (Bash) | `./scripts/ci-local.sh` |
+| **Run suite** (requires iperf3 server) | `pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -Port 5201` |
+
+See [BUGS_AND_FIXES.md](BUGS_AND_FIXES.md) for known limitations and troubleshooting.
+
 ## Troubleshooting
 - `iperf3` not found: Ensure the iperf3 client is installed and in `PATH`.
 - Reachability failures: ICMP and TCP port checks must succeed; verify firewall rules and server state.
@@ -129,4 +145,4 @@ pwsh -NoProfile -Command "Get-InstalledModule PSScriptAnalyzer,Pester | Select-O
 - Missing JSON output: Confirm iperf3 supports `-J` and check for stderr output in `RawText`.
 
 ## License
-See `LICENSE`.
+See [LICENSE](LICENSE).
