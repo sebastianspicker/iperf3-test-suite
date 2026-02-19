@@ -6,7 +6,7 @@ $script:DefaultInvokeIperf3TestSuiteParams = @{
   Duration           = 10
   Omit               = 1
   MaxJobs            = 1
-  OutDir             = $null  # set at runtime in Get-Iperf3TestSuiteDefaultParameters
+  OutDir             = $null  # set at runtime in Get-Iperf3TestSuiteDefaultParameterSet
   Quiet                 = $false
   Progress              = $false
   Summary               = $false
@@ -24,7 +24,7 @@ $script:DefaultInvokeIperf3TestSuiteParams = @{
   IpVersion          = 'Auto'
 }
 
-function Get-Iperf3TestSuiteDefaultParameters {
+function Get-Iperf3TestSuiteDefaultParameterSet {
   [CmdletBinding()]
   [OutputType([hashtable])]
   param()
@@ -129,7 +129,7 @@ function Test-Reachability {
         if ($LASTEXITCODE -eq 0) { return $stack }
       }
       catch {
-        # ping.exe missing or failed; continue to next stack
+        Write-Verbose "ping.exe failed for $stack; continuing to next stack."
       }
     }
   }
@@ -164,7 +164,7 @@ function Test-TcpPortAndTrace {
     $trace = Test-NetConnection -ComputerName $ComputerName -TraceRoute -Hops $Hops -InformationLevel Detailed -ErrorAction Stop
   }
   catch {
-    # Traceroute failed (e.g. ICMP filtered); TCP result still valid
+    Write-Verbose "Traceroute failed (e.g. ICMP filtered); TCP result still valid."
   }
 
   [pscustomobject]@{
@@ -286,7 +286,7 @@ function Get-JsonSubstringOrNull {
           return $candidate
         }
         catch {
-          # Not valid JSON; continue to find next balanced object
+          Write-Verbose "Candidate substring is not valid JSON; continuing."
         }
       }
       $i++

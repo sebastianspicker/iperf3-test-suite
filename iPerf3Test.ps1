@@ -81,7 +81,7 @@ $ErrorActionPreference = 'Stop'
 $modulePath = Join-Path $PSScriptRoot 'src/Iperf3TestSuite.psd1'
 Import-Module $modulePath -Force
 
-$merged = Get-Iperf3TestSuiteDefaultParameters
+$merged = Get-Iperf3TestSuiteDefaultParameterSet
 foreach ($key in $PSBoundParameters.Keys) {
   $merged[$key] = $PSBoundParameters[$key]
 }
