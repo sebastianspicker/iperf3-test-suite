@@ -11,9 +11,11 @@ Windows-focused iperf3 client test runner for PowerShell 7+. It executes a TCP/U
 
 ## Requirements
 - PowerShell 7+ (`pwsh`)
-- Windows host with networking tools (`Test-NetConnection`, `ping.exe`)
-- iperf3 client installed on the runner host
+- Windows host with networking tools (`Test-NetConnection`, `ping.exe`) unless using `-SkipReachabilityCheck` and `-DisableMtuProbe`
+- iperf3 client **3.7+** (for `-J`, `--connect-timeout`; `--bidir` needs 3.7+)
 - Reachable iperf3 server (`iperf3 -s`) on the target
+
+Run the CLI with `pwsh -File`; do not dot-source the script (to avoid leaking `StrictMode`/`ErrorActionPreference` into the caller).
 
 ## Repo layout
 - `iPerf3Test.ps1` — CLI entrypoint (wraps the module)
@@ -42,6 +44,9 @@ pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -IpVersion IPv4
 
 # Disable MTU payload probe
 pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -DisableMtuProbe
+
+# Skip ICMP reachability (proceed when only TCP port is open)
+pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -SkipReachabilityCheck
 ```
 
 ## Configuration (Key Parameters)
@@ -53,14 +58,17 @@ This list is not exhaustive; see the script help for all options.
 - `-Omit` (default `1`): omit seconds at test start.
 - `-IpVersion` (`Auto|IPv4|IPv6`): network stack selection.
 - `-DisableMtuProbe`: skip MTU payload probing.
+- `-SkipReachabilityCheck`: skip ICMP; proceed when TCP port check succeeds (useful when ping is blocked).
 - `-DscpClasses`: DSCP classes to test (e.g., `CS0`, `AF11`, `EF`).
 - `-TcpStreams`, `-TcpWindows`: TCP stream/window matrices.
 - `-UdpStart`, `-UdpMax`, `-UdpStep`: UDP bandwidth sweep (Mbit/s, `K/M/G`).
 - `-UdpLossThreshold`: break UDP sweep on loss percentage.
 - `-OutDir`: output directory for CSV/JSON.
+- `-Progress`: print per-test progress (e.g. "Running test N ...").
+- `-Summary`: print total test count at the end (with CSV/JSON paths).
 
 ## Output
-By default outputs to `./logs`:
+By default outputs to `./logs` (timestamp includes subsecond to avoid overwrites):
 - `iperf3_summary_<TIMESTAMP>.csv`
 - `iperf3_results_<TIMESTAMP>.json`
 
@@ -97,26 +105,10 @@ pwsh -NoProfile -Command "Invoke-Pester"
 ```
 
 ## Security
-Lightweight secret scan (no output of matches):
+Lightweight secret scan (no output of matches); path-agnostic .git exclusion:
 
 ```powershell
-$patterns = @(
-  '-----BEGIN (RSA|DSA|EC|OPENSSH) PRIVATE KEY-----',
-  'AKIA[0-9A-Z]{16}',
-  'ASIA[0-9A-Z]{16}',
-  'ghp_[A-Za-z0-9]{36}',
-  'github_pat_[A-Za-z0-9_]{22,}',
-  'xox[baprs]-[A-Za-z0-9-]{10,48}'
-)
-$files = Get-ChildItem -Recurse -File -Force | Where-Object { $_.FullName -notlike '*\.git\*' }
-$hitCount = 0
-foreach ($pattern in $patterns) {
-  $hits = $files | Select-String -Pattern $pattern
-  if ($hits) { $hitCount += $hits.Count }
-}
-if ($hitCount -gt 0) {
-  Write-Error "Potential secrets detected. Review locally; output suppressed."
-}
+pwsh -NoProfile -File .\scripts\Invoke-SecretScan.ps1
 ```
 
 Dependency inventory (PowerShell modules):
@@ -140,7 +132,7 @@ See [BUGS_AND_FIXES.md](BUGS_AND_FIXES.md) for known limitations and troubleshoo
 
 ## Troubleshooting
 - `iperf3` not found: Ensure the iperf3 client is installed and in `PATH`.
-- Reachability failures: ICMP and TCP port checks must succeed; verify firewall rules and server state.
+- Reachability failures: By default ICMP must succeed; use `-SkipReachabilityCheck` when only TCP is open. Verify firewall and server.
 - ScriptAnalyzer warnings on non-Windows: Run checks on Windows or adjust rules for your environment.
 - Missing JSON output: Confirm iperf3 supports `-J` and check for stderr output in `RawText`.
 

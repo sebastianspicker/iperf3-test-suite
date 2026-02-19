@@ -47,25 +47,7 @@ jobs:
 
       - name: Secret scan (lightweight)
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $patterns = @(
-            '-----BEGIN (RSA|DSA|EC|OPENSSH) PRIVATE KEY-----',
-            'AKIA[0-9A-Z]{16}',
-            'ASIA[0-9A-Z]{16}',
-            'ghp_[A-Za-z0-9]{36}',
-            'github_pat_[A-Za-z0-9_]{22,}',
-            'xox[baprs]-[A-Za-z0-9-]{10,48}'
-          )
-          $files = Get-ChildItem -Recurse -File -Force | Where-Object { $_.FullName -notlike '*\.git\*' }
-          $hitCount = 0
-          foreach ($pattern in $patterns) {
-            $hits = $files | Select-String -Pattern $pattern
-            if ($hits) { $hitCount += $hits.Count }
-          }
-          if ($hitCount -gt 0) {
-            Write-Error "Potential secrets detected. Review locally; output suppressed."
-          }
+        run: pwsh -NoLogo -NoProfile -File ./scripts/Invoke-SecretScan.ps1
 
       - name: Quality gates (ScriptAnalyzer + Pester)
         shell: pwsh

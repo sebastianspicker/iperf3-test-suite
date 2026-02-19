@@ -8,7 +8,7 @@
   Description = 'PowerShell iperf3 test suite runner (CSV/JSON artifacts, DSCP marking, optional MTU probe).'
   PowerShellVersion = '7.0'
   CompatiblePSEditions = @('Core')
-  FunctionsToExport = @('Invoke-Iperf3TestSuite')
+  FunctionsToExport = @('Invoke-Iperf3TestSuite', 'Get-Iperf3TestSuiteDefaultParameters')
   CmdletsToExport = @()
   VariablesToExport = @()
   AliasesToExport = @()

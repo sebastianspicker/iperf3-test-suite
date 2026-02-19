@@ -3,6 +3,20 @@ $ErrorActionPreference = 'Stop'
 BeforeAll {
   $modulePath = Join-Path $PSScriptRoot '../src/Iperf3TestSuite.psd1'
   Import-Module $modulePath -Force
+  $script:TestCapability = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
+  $global:Iperf3TestSuite_TestCapability = $script:TestCapability
+}
+
+function New-TestCapability {
+  $script:TestCapability
+}
+
+function New-TestTcpResult {
+  param([bool]$TcpSucceeded = $true, [object]$Trace = $null)
+  [pscustomobject]@{
+    Tcp   = [pscustomobject]@{ TcpTestSucceeded = $TcpSucceeded; RemoteAddress = '127.0.0.1'; PingSucceeded = $true }
+    Trace = $Trace
+  }
 }
 
 Describe 'Iperf3TestSuite helpers' {
@@ -148,7 +162,7 @@ Describe 'Iperf3TestSuite helpers' {
     It 'adds -R for TCP RX' {
       $captured = InModuleScope Iperf3TestSuite {
         $script:captured = $null
-        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
+        $caps = $global:Iperf3TestSuite_TestCapability
         $runner = {
           param([string[]]$IperfArgs)
           $script:captured = $IperfArgs
@@ -166,7 +180,7 @@ Describe 'Iperf3TestSuite helpers' {
     It 'adds --bidir for TCP BD when supported' {
       $captured = InModuleScope Iperf3TestSuite {
         $script:captured = $null
-        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
+        $caps = $global:Iperf3TestSuite_TestCapability
         $runner = {
           param([string[]]$IperfArgs)
           $script:captured = $IperfArgs
@@ -184,7 +198,7 @@ Describe 'Iperf3TestSuite helpers' {
     It 'adds -u and -b for UDP' {
       $captured = InModuleScope Iperf3TestSuite {
         $script:captured = $null
-        $caps = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
+        $caps = $global:Iperf3TestSuite_TestCapability
         $runner = {
           param([string[]]$IperfArgs)
           $script:captured = $IperfArgs
@@ -205,10 +219,11 @@ Describe 'Iperf3TestSuite helpers' {
   Context 'Failure handling' {
     It 'throws when reachability fails' {
       InModuleScope Iperf3TestSuite {
-        Mock Get-Command { [pscustomobject]@{ Name = 'iperf3' } } -ParameterFilter { $Name -eq 'iperf3' }
-        Mock Get-Iperf3Capability { [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true } }
+        Mock Get-Command { [pscustomobject]@{ Name = $Name } }
+        Mock Get-Iperf3Capability { $global:Iperf3TestSuite_TestCapability }
         Mock Test-Reachability { 'None' }
         Mock Test-TcpPortAndTrace { throw 'Should not be called' }
+        Mock Invoke-Iperf3 { throw 'Should not be called' }
 
         Should -Throw -ActualValue { Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet } -ExpectedMessage "ICMP reachability*"
       }
@@ -216,15 +231,13 @@ Describe 'Iperf3TestSuite helpers' {
 
     It 'throws when TCP port is not reachable' {
       InModuleScope Iperf3TestSuite {
-        Mock Get-Command { [pscustomobject]@{ Name = 'iperf3' } } -ParameterFilter { $Name -eq 'iperf3' }
-        Mock Get-Iperf3Capability { [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true } }
+        Mock Get-Command { [pscustomobject]@{ Name = $Name } }
+        Mock Get-Iperf3Capability { $global:Iperf3TestSuite_TestCapability }
         Mock Test-Reachability { 'IPv4' }
         Mock Test-TcpPortAndTrace {
-          [pscustomobject]@{
-            Tcp   = [pscustomobject]@{ TcpTestSucceeded = $false }
-            Trace = $null
-          }
+          [pscustomobject]@{ Tcp = [pscustomobject]@{ TcpTestSucceeded = $false; RemoteAddress = '127.0.0.1'; PingSucceeded = $true }; Trace = $null }
         }
+        Mock Invoke-Iperf3 { throw 'Should not be called' }
 
         Should -Throw -ActualValue { Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet } -ExpectedMessage "TCP port*"
       }
@@ -234,16 +247,13 @@ Describe 'Iperf3TestSuite helpers' {
   Context 'UDP saturation loop' {
     It 'stops when loss exceeds threshold' {
       InModuleScope Iperf3TestSuite {
+        Mock Get-Command { [pscustomobject]@{ Name = $Name } }
         $script:udpBws = New-Object System.Collections.Generic.List[string]
 
-        Mock Get-Command { [pscustomobject]@{ Name = 'iperf3' } } -ParameterFilter { $Name -eq 'iperf3' }
-        Mock Get-Iperf3Capability { [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true } }
+        Mock Get-Iperf3Capability { $global:Iperf3TestSuite_TestCapability }
         Mock Test-Reachability { 'IPv4' }
         Mock Test-TcpPortAndTrace {
-          [pscustomobject]@{
-            Tcp   = [pscustomobject]@{ TcpTestSucceeded = $true; RemoteAddress = '127.0.0.1'; PingSucceeded = $true }
-            Trace = [pscustomobject]@{ TraceRoute = @() }
-          }
+          [pscustomobject]@{ Tcp = [pscustomobject]@{ TcpTestSucceeded = $true; RemoteAddress = '127.0.0.1'; PingSucceeded = $true }; Trace = [pscustomobject]@{ TraceRoute = @() } }
         }
 
         Mock Invoke-Iperf3 {
@@ -293,6 +303,7 @@ Describe 'Iperf3TestSuite helpers' {
           -UdpStart '1M' -UdpMax '2M' -UdpStep '1M' -UdpLossThreshold 1.0
 
         $script:udpBws | Where-Object { $_ -eq '2M' } | Should -BeNullOrEmpty
+        $script:udpBws.Count | Should -BeGreaterOrEqual 1
       }
     }
   }

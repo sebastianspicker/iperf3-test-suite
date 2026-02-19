@@ -1,5 +1,45 @@
 Set-StrictMode -Version Latest
 
+# Default parameter set for Invoke-Iperf3TestSuite (single source for CLI merge)
+$script:DefaultInvokeIperf3TestSuiteParams = @{
+  Port              = 5201
+  Duration           = 10
+  Omit               = 1
+  MaxJobs            = 1
+  OutDir             = $null  # set at runtime in Get-Iperf3TestSuiteDefaultParameters
+  Quiet                 = $false
+  Progress              = $false
+  Summary               = $false
+  DisableMtuProbe       = $false
+  SkipReachabilityCheck = $false
+  MtuSizes              = @(1400, 1472, 1600)
+  ConnectTimeoutMs   = 60000
+  UdpStart           = '1M'
+  UdpMax             = '1G'
+  UdpStep            = '10M'
+  UdpLossThreshold   = 5.0
+  TcpStreams         = @(1, 4, 8)
+  TcpWindows         = @('default', '128K', '256K')
+  DscpClasses         = @('CS0', 'AF11', 'CS5', 'EF', 'AF41')
+  IpVersion          = 'Auto'
+}
+
+function Get-Iperf3TestSuiteDefaultParameters {
+  [CmdletBinding()]
+  [OutputType([hashtable])]
+  param()
+  $h = $script:DefaultInvokeIperf3TestSuiteParams.Clone()
+  if (-not $h['OutDir']) { $h['OutDir'] = Join-Path (Get-Location) 'logs' }
+  return $h
+}
+
+function New-Iperf3Metric {
+  [CmdletBinding()]
+  [OutputType([pscustomobject])]
+  param()
+  [pscustomobject]@{ TxMbps = $null; RxMbps = $null; Retr = $null; LossPct = $null; JitterMs = $null }
+}
+
 function Get-TosFromDscpClass {
   [CmdletBinding()]
   [OutputType([int])]
@@ -67,31 +107,29 @@ function Test-Reachability {
     [string]$Mode
   )
 
-  try {
-    if ($Mode -eq 'IPv4' -or $Mode -eq 'Auto') {
-      if (Test-Connection -ComputerName $ComputerName -Count 1 -Quiet -IPv4) {
-        return 'IPv4'
-      }
-    }
-    if ($Mode -eq 'IPv6' -or $Mode -eq 'Auto') {
-      if (Test-Connection -ComputerName $ComputerName -Count 1 -Quiet -IPv6) {
-        return 'IPv6'
-      }
-    }
+  $stacksToTry = switch ($Mode) {
+    'IPv4' { @('IPv4') }
+    'IPv6' { @('IPv6') }
+    default { @('IPv4', 'IPv6') }
   }
-  catch {
-    if ($Mode -eq 'IPv4' -or $Mode -eq 'Auto') {
-      $null = & ping.exe -4 -n 1 $ComputerName 2>$null
-      $pingExit = $LASTEXITCODE
-      if ($pingExit -eq 0) {
+
+  foreach ($stack in $stacksToTry) {
+    try {
+      if ($stack -eq 'IPv4' -and (Test-Connection -ComputerName $ComputerName -Count 1 -Quiet -IPv4 -ErrorAction Stop)) {
         return 'IPv4'
       }
-    }
-    if ($Mode -eq 'IPv6' -or $Mode -eq 'Auto') {
-      $null = & ping.exe -6 -n 1 $ComputerName 2>$null
-      $pingExit = $LASTEXITCODE
-      if ($pingExit -eq 0) {
+      if ($stack -eq 'IPv6' -and (Test-Connection -ComputerName $ComputerName -Count 1 -Quiet -IPv6 -ErrorAction Stop)) {
         return 'IPv6'
+      }
+    }
+    catch {
+      try {
+        $pingArgs = if ($stack -eq 'IPv4') { @('-4', '-n', 1, $ComputerName) } else { @('-6', '-n', 1, $ComputerName) }
+        $null = & ping.exe @pingArgs 2>$null
+        if ($LASTEXITCODE -eq 0) { return $stack }
+      }
+      catch {
+        # ping.exe missing or failed; continue to next stack
       }
     }
   }
@@ -112,15 +150,21 @@ function Test-TcpPortAndTrace {
     [int]$Hops = 5
   )
 
+  $tcp = $null
+  $trace = $null
+
   try {
     $tcp = Test-NetConnection -ComputerName $ComputerName -Port $Port -InformationLevel Detailed -ErrorAction Stop
+  }
+  catch {
+    return [pscustomobject]@{ Tcp = $null; Trace = $null }
+  }
+
+  try {
     $trace = Test-NetConnection -ComputerName $ComputerName -TraceRoute -Hops $Hops -InformationLevel Detailed -ErrorAction Stop
   }
   catch {
-    return [pscustomobject]@{
-      Tcp   = $null
-      Trace = $null
-    }
+    # Traceroute failed (e.g. ICMP filtered); TCP result still valid
   }
 
   [pscustomobject]@{
@@ -144,14 +188,13 @@ function Test-MtuPayload {
 
   $fails = New-Object System.Collections.Generic.List[int]
   foreach ($sz in $Sizes) {
-    if ($Stack -eq 'IPv4') {
-      $null = & ping.exe -4 -n 1 -f -l $sz $ComputerName 2>$null
+    $pingArgs = if ($Stack -eq 'IPv4') {
+      @('-4', '-n', 1, '-f', '-l', $sz, $ComputerName)
+    } else {
+      @('-6', '-n', 1, '-l', $sz, $ComputerName)
     }
-    else {
-      $null = & ping.exe -6 -n 1 -l $sz $ComputerName 2>$null
-    }
-    $pingExit = $LASTEXITCODE
-    if ($pingExit -ne 0) {
+    $null = & ping.exe @pingArgs 2>$null
+    if ($LASTEXITCODE -ne 0) {
       [void]$fails.Add($sz)
     }
   }
@@ -202,30 +245,54 @@ function Get-JsonSubstringOrNull {
     return $null
   }
 
-  $startMatches = [regex]::Matches($Text, '\{')
-  $endMatches = [regex]::Matches($Text, '\}')
-
-  if ($startMatches.Count -eq 0 -or $endMatches.Count -eq 0) {
-    return $null
+  $maxLen = 2MB
+  if ($Text.Length -gt $maxLen) {
+    $Text = $Text.Substring(0, $maxLen)
   }
 
-  $starts = @($startMatches | ForEach-Object { $_.Index })
-  $ends = @($endMatches | ForEach-Object { $_.Index })
-
-  foreach ($s in $starts) {
-    for ($i = $ends.Count - 1; $i -ge 0; $i--) {
-      $e = $ends[$i]
-      if ($e -le $s) { break }
-
-      $candidate = $Text.Substring($s, ($e - $s + 1))
-      try {
-        $null = ConvertFrom-Json -InputObject $candidate -ErrorAction Stop
-        return $candidate
-      }
-      catch {
-        continue
-      }
+  $depth = 0
+  $start = -1
+  $inString = $false
+  $escape = $false
+  $quote = [char]0
+  $i = 0
+  while ($i -lt $Text.Length) {
+    $c = $Text[$i]
+    if ($inString) {
+      if ($escape) { $escape = $false }
+      elseif ($c -eq '\') { $escape = $true }
+      elseif ($c -eq $quote) { $inString = $false }
+      $i++
+      continue
     }
+    if ($c -eq '"' -or $c -eq "'") {
+      $inString = $true
+      $quote = $c
+      $i++
+      continue
+    }
+    if ($c -eq '{') {
+      if ($depth -eq 0) { $start = $i }
+      $depth++
+      $i++
+      continue
+    }
+    if ($c -eq '}') {
+      $depth--
+      if ($depth -eq 0 -and $start -ge 0) {
+        $candidate = $Text.Substring($start, ($i - $start + 1))
+        try {
+          $null = ConvertFrom-Json -InputObject $candidate -ErrorAction Stop
+          return $candidate
+        }
+        catch {
+          # Not valid JSON; continue to find next balanced object
+        }
+      }
+      $i++
+      continue
+    }
+    $i++
   }
 
   return $null
@@ -301,6 +368,7 @@ function Invoke-Iperf3 {
   $rawText = $rawLines | Out-String
 
   $jsonObj = $null
+  $jsonParseError = $null
   $jsonText = Get-JsonSubstringOrNull -Text $rawText
 
   if ($null -ne $jsonText) {
@@ -309,15 +377,17 @@ function Invoke-Iperf3 {
     }
     catch {
       $jsonObj = $null
+      $jsonParseError = $_.Exception.Message
     }
   }
 
   return [pscustomobject]@{
-    Args     = $iperfArgs
-    ExitCode = $exitCode
-    RawLines = $rawLines
-    RawText  = $rawText
-    Json     = $jsonObj
+    Args           = $iperfArgs
+    ExitCode       = $exitCode
+    RawLines       = $rawLines
+    RawText        = $rawText
+    Json           = $jsonObj
+    JsonParseError = $jsonParseError
   }
 }
 
@@ -336,12 +406,12 @@ function Get-Iperf3Metric {
   )
 
   if (-not $Json) {
-    return [pscustomobject]@{ TxMbps = $null; RxMbps = $null; Retr = $null; LossPct = $null; JitterMs = $null }
+    return New-Iperf3Metric
   }
 
   $end = $Json.end
   if (-not $end) {
-    return [pscustomobject]@{ TxMbps = $null; RxMbps = $null; Retr = $null; LossPct = $null; JitterMs = $null }
+    return New-Iperf3Metric
   }
 
   $sumSent = $null
@@ -358,22 +428,20 @@ function Get-Iperf3Metric {
   $loss = $null
   $jit = $null
 
+  function Get-BitsPerSecondMbps {
+    param([object]$Obj)
+    if (-not $Obj -or $Obj.PSObject.Properties.Name -notcontains 'bits_per_second') { return $null }
+    [math]::Round(($Obj.bits_per_second / 1e6), 2)
+  }
+
   if ($Proto -eq 'TCP') {
     if ($Dir -eq 'TX' -or $Dir -eq 'BD') {
-      if ($sumSent -and $sumSent.bits_per_second) {
-        $txMbps = [math]::Round(($sumSent.bits_per_second / 1e6), 2)
-      }
-      if ($sumRecv -and $sumRecv.bits_per_second) {
-        $rxMbps = [math]::Round(($sumRecv.bits_per_second / 1e6), 2)
-      }
+      $txMbps = Get-BitsPerSecondMbps -Obj $sumSent
+      $rxMbps = Get-BitsPerSecondMbps -Obj $sumRecv
     }
     elseif ($Dir -eq 'RX') {
-      if ($sumRecv -and $sumRecv.bits_per_second) {
-        $rxMbps = [math]::Round(($sumRecv.bits_per_second / 1e6), 2)
-      }
-      if ($sumSent -and $sumSent.bits_per_second) {
-        $txMbps = [math]::Round(($sumSent.bits_per_second / 1e6), 2)
-      }
+      $rxMbps = Get-BitsPerSecondMbps -Obj $sumRecv
+      $txMbps = Get-BitsPerSecondMbps -Obj $sumSent
     }
 
     if ($sumSent -and ($sumSent.PSObject.Properties.Name -contains 'retransmits')) {
@@ -383,11 +451,26 @@ function Get-Iperf3Metric {
     return [pscustomobject]@{ TxMbps = $txMbps; RxMbps = $rxMbps; Retr = $retr; LossPct = $null; JitterMs = $null }
   }
 
-  if ($sumSent -and $sumSent.bits_per_second) {
-    $txMbps = [math]::Round(($sumSent.bits_per_second / 1e6), 2)
+  # UDP: support end.sum when sum_sent/sum_received missing; map by Dir; 0 throughput is valid
+  $sentBps = $sumSent
+  $recvBps = $sumRecv
+  if (-not $sentBps -and $sumUdp -and ($sumUdp.PSObject.Properties.Name -contains 'bits_per_second')) {
+    $sentBps = $sumUdp
   }
-  if ($sumRecv -and $sumRecv.bits_per_second) {
-    $rxMbps = [math]::Round(($sumRecv.bits_per_second / 1e6), 2)
+  if (-not $recvBps -and $sumUdp) {
+    $recvBps = $sumUdp
+  }
+  if ($Dir -eq 'TX') {
+    $txMbps = Get-BitsPerSecondMbps -Obj $sentBps
+    $rxMbps = Get-BitsPerSecondMbps -Obj $recvBps
+  }
+  elseif ($Dir -eq 'RX') {
+    $rxMbps = Get-BitsPerSecondMbps -Obj $recvBps
+    $txMbps = Get-BitsPerSecondMbps -Obj $sentBps
+  }
+  else {
+    $txMbps = Get-BitsPerSecondMbps -Obj $sentBps
+    $rxMbps = Get-BitsPerSecondMbps -Obj $recvBps
   }
 
   if ($sumSent -and ($sumSent.PSObject.Properties.Name -contains 'lost_percent')) {
@@ -438,6 +521,66 @@ function ConvertTo-Iperf3CsvRow {
   }
 }
 
+function Add-Iperf3TestResult {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)]
+    [AllowEmptyCollection()]
+    [System.Collections.Generic.List[object]]$AllResultsList,
+    [Parameter(Mandatory)]
+    [AllowEmptyCollection()]
+    [System.Collections.Generic.List[object]]$CsvRowsList,
+    [Parameter(Mandatory)]
+    [int]$No,
+    [Parameter(Mandatory)]
+    [ValidateSet('TCP', 'UDP')]
+    [string]$Proto,
+    [Parameter(Mandatory)]
+    [ValidateSet('TX', 'RX', 'BD')]
+    [string]$Dir,
+    [Parameter(Mandatory)]
+    [string]$DSCP,
+    [Parameter(Mandatory)]
+    [int]$Tos,
+    [int]$Streams = 1,
+    [string]$Window = '',
+    [string]$UdpBw = '',
+    [Parameter(Mandatory)]
+    [string]$Stack,
+    [Parameter(Mandatory)]
+    [string]$Target,
+    [Parameter(Mandatory)]
+    [int]$Port,
+    [Parameter(Mandatory)]
+    [object]$Run,
+    [Parameter(Mandatory)]
+    [pscustomobject]$Metrics
+  )
+
+  [void]$AllResultsList.Add([pscustomobject]@{
+      No       = $No
+      Proto    = $Proto
+      Dir      = $Dir
+      DSCP     = $DSCP
+      Tos      = $Tos
+      Streams  = $Streams
+      Window   = $Window
+      UdpBw    = $UdpBw
+      Stack    = $Stack
+      Target   = $Target
+      Port     = $Port
+      ExitCode = $Run.ExitCode
+      Metrics  = $Metrics
+      Args     = $Run.Args
+      RawText  = $Run.RawText
+    })
+
+  [void]$CsvRowsList.Add(
+    (ConvertTo-Iperf3CsvRow -No $No -Proto $Proto -Dir $Dir -DSCP $DSCP -Streams $Streams -Win $Window `
+      -ThrTxMbps $Metrics.TxMbps -RetrTx $Metrics.Retr -ThrRxMbps $Metrics.RxMbps -LossTxPct $Metrics.LossPct -JitterMs $Metrics.JitterMs -Role 'end')
+  )
+}
+
 function Invoke-Iperf3TestSuite {
   <#
   .SYNOPSIS
@@ -473,7 +616,13 @@ function Invoke-Iperf3TestSuite {
 
     [switch]$Quiet,
 
+    [switch]$Progress,
+
+    [switch]$Summary,
+
     [switch]$DisableMtuProbe,
+
+    [switch]$SkipReachabilityCheck,
 
     [ValidateNotNullOrEmpty()]
     [int[]]$MtuSizes = @(1400, 1472, 1600),
@@ -512,11 +661,17 @@ function Invoke-Iperf3TestSuite {
   try {
     $null = Get-Command iperf3 -ErrorAction Stop
     $null = Get-Command ConvertFrom-Json -ErrorAction Stop
+    if ((-not $SkipReachabilityCheck -or -not $DisableMtuProbe) -and ($IsWindows -or $env:OS -match 'Windows')) {
+      $pingCmd = Get-Command ping.exe -ErrorAction SilentlyContinue
+      if (-not $pingCmd) {
+        throw "ping.exe is required for reachability check or MTU probe but was not found. Use -SkipReachabilityCheck and -DisableMtuProbe to run without it (Windows only)."
+      }
+    }
 
-    $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
+    $ts = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
     $null = New-Item -ItemType Directory -Path $OutDir -Force
-    $jsonPath = Join-Path $OutDir "iperf3_results_$ts.json"
-    $csvPath = Join-Path $OutDir "iperf3_summary_$ts.csv"
+    $jsonPath = Join-Path -Path $OutDir -ChildPath "iperf3_results_$ts.json"
+    $csvPath = Join-Path -Path $OutDir -ChildPath "iperf3_summary_$ts.csv"
 
     if ($MaxJobs -ne 1) {
       Write-Warning "MaxJobs is currently enforced to 1 to avoid iperf3 server overload and complex job state."
@@ -527,12 +682,20 @@ function Invoke-Iperf3TestSuite {
 
     $stack = Test-Reachability -ComputerName $Target -Mode $IpVersion
     if ($stack -eq 'None') {
-      throw "ICMP reachability to '$Target' failed; aborting."
+      if (-not $SkipReachabilityCheck) {
+        throw "ICMP reachability to '$Target' failed; aborting. Use -SkipReachabilityCheck to proceed when only TCP is reachable."
+      }
+      Write-Verbose "ICMP reachability failed; proceeding with TCP port check only."
     }
 
     $net = Test-TcpPortAndTrace -ComputerName $Target -Port $Port -Hops 5
     if (-not $net -or -not $net.Tcp -or -not $net.Tcp.TcpTestSucceeded) {
       throw "TCP port $Port on '$Target' not reachable; aborting."
+    }
+
+    if ($stack -eq 'None') {
+      $stack = if ($net.Tcp.RemoteAddress -match ':') { 'IPv6' } else { 'IPv4' }
+      Write-Verbose "Using stack $stack from TCP connection."
     }
 
     $mtuFails = @()
@@ -553,65 +716,24 @@ function Invoke-Iperf3TestSuite {
         foreach ($s in $TcpStreams) {
           foreach ($w in $TcpWindows) {
             $testNo++
+            if ($Progress) { Write-Information -InformationAction Continue "Running test $testNo (TCP $dir $dscp P=$s w=$w)..." }
 
             $run = Invoke-Iperf3 -Server $Target -Port $Port -Stack $stack -Duration $Duration -Omit $Omit `
               -Tos $tos -Proto 'TCP' -Dir $dir -Streams $s -Win $w -ConnectTimeoutMs $ConnectTimeoutMs -Caps $caps
             $m = Get-Iperf3Metric -Json $run.Json -Proto 'TCP' -Dir $dir
-
-            $allResults.Add([pscustomobject]@{
-              No       = $testNo
-              Proto    = 'TCP'
-              Dir      = $dir
-              DSCP     = $dscp
-              Tos      = $tos
-              Streams  = $s
-              Window   = $w
-              Stack    = $stack
-              Target   = $Target
-              Port     = $Port
-              ExitCode = $run.ExitCode
-              Metrics  = $m
-              Args     = $run.Args
-              RawText  = $run.RawText
-            }) | Out-Null
-
-            $csvRows.Add(
-              (ConvertTo-Iperf3CsvRow -No $testNo -Proto 'TCP' -Dir $dir -DSCP $dscp -Streams $s -Win $w `
-                -ThrTxMbps $m.TxMbps -RetrTx $m.Retr -ThrRxMbps $m.RxMbps -LossTxPct $null -JitterMs $null -Role 'end')
-            ) | Out-Null
+            Add-Iperf3TestResult -AllResultsList $allResults -CsvRowsList $csvRows -No $testNo -Proto 'TCP' -Dir $dir -DSCP $dscp -Tos $tos -Streams $s -Window $w -Stack $stack -Target $Target -Port $Port -Run $run -Metrics $m
           }
         }
       }
 
       foreach ($dir in @('TX', 'RX')) {
         $testNo++
+        if ($Progress) { Write-Information -InformationAction Continue "Running test $testNo (UDP $dir $dscp)..." }
 
         $run = Invoke-Iperf3 -Server $Target -Port $Port -Stack $stack -Duration $Duration -Omit $Omit `
           -Tos $tos -Proto 'UDP' -Dir $dir -UdpBw $UdpStart -ConnectTimeoutMs $ConnectTimeoutMs -Caps $caps
         $m = Get-Iperf3Metric -Json $run.Json -Proto 'UDP' -Dir $dir
-
-        $allResults.Add([pscustomobject]@{
-          No       = $testNo
-          Proto    = 'UDP'
-          Dir      = $dir
-          DSCP     = $dscp
-          Tos      = $tos
-          Streams  = 1
-          Window   = ''
-          UdpBw    = $UdpStart
-          Stack    = $stack
-          Target   = $Target
-          Port     = $Port
-          ExitCode = $run.ExitCode
-          Metrics  = $m
-          Args     = $run.Args
-          RawText  = $run.RawText
-        }) | Out-Null
-
-        $csvRows.Add(
-          (ConvertTo-Iperf3CsvRow -No $testNo -Proto 'UDP' -Dir $dir -DSCP $dscp -Streams 1 -Win '' `
-            -ThrTxMbps $m.TxMbps -RetrTx $null -ThrRxMbps $m.RxMbps -LossTxPct $m.LossPct -JitterMs $m.JitterMs -Role 'end')
-        ) | Out-Null
+        Add-Iperf3TestResult -AllResultsList $allResults -CsvRowsList $csvRows -No $testNo -Proto 'UDP' -Dir $dir -DSCP $dscp -Tos $tos -Window '' -UdpBw $UdpStart -Stack $stack -Target $Target -Port $Port -Run $run -Metrics $m
       }
 
       $cur = ConvertTo-MbitPerSecond $UdpStart
@@ -626,34 +748,13 @@ function Invoke-Iperf3TestSuite {
         while ($bw -le $max -and $iterations -lt $maxUdpIterations) {
           $iterations++
           $testNo++
-          $bwStr = '{0}M' -f $bw
+          if ($Progress) { Write-Information -InformationAction Continue "Running test $testNo (UDP saturation $dir $dscp $bw Mbit/s)..." }
+          $bwStr = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0}M', $bw)
 
           $run = Invoke-Iperf3 -Server $Target -Port $Port -Stack $stack -Duration $Duration -Omit $Omit `
             -Tos $tos -Proto 'UDP' -Dir $dir -UdpBw $bwStr -ConnectTimeoutMs $ConnectTimeoutMs -Caps $caps
           $m = Get-Iperf3Metric -Json $run.Json -Proto 'UDP' -Dir $dir
-
-          $allResults.Add([pscustomobject]@{
-            No       = $testNo
-            Proto    = 'UDP'
-            Dir      = $dir
-            DSCP     = $dscp
-            Tos      = $tos
-            Streams  = 1
-            Window   = ''
-            UdpBw    = $bwStr
-            Stack    = $stack
-            Target   = $Target
-            Port     = $Port
-            ExitCode = $run.ExitCode
-            Metrics  = $m
-            Args     = $run.Args
-            RawText  = $run.RawText
-          }) | Out-Null
-
-          $csvRows.Add(
-            (ConvertTo-Iperf3CsvRow -No $testNo -Proto 'UDP' -Dir $dir -DSCP $dscp -Streams 1 -Win '' `
-              -ThrTxMbps $m.TxMbps -RetrTx $null -ThrRxMbps $m.RxMbps -LossTxPct $m.LossPct -JitterMs $m.JitterMs -Role 'end')
-          ) | Out-Null
+          Add-Iperf3TestResult -AllResultsList $allResults -CsvRowsList $csvRows -No $testNo -Proto 'UDP' -Dir $dir -DSCP $dscp -Tos $tos -Window '' -UdpBw $bwStr -Stack $stack -Target $Target -Port $Port -Run $run -Metrics $m
 
           if ($run.ExitCode -ne 0 -and $null -eq $run.Json) {
             break
@@ -695,6 +796,9 @@ function Invoke-Iperf3TestSuite {
     if (-not $Quiet) {
       Write-Information -InformationAction Continue "CSV  : $csvPath"
       Write-Information -InformationAction Continue "JSON : $jsonPath"
+      if ($Summary) {
+        Write-Information -InformationAction Continue "Tests: $testNo total"
+      }
     }
   }
   finally {

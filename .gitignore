@@ -36,12 +36,13 @@ node_modules/
 dist/
 .terraform/
 
-# Output artifacts
+# Output artifacts (narrow patterns so repo can track config/fixtures/schemas)
 logs/
-*.csv
-*.json
+logs/*.csv
+logs/*.json
 *.log
 *.nupkg
 
-# Local / scratch docs (do not commit)
+# Local / scratch docs and tooling (do not commit)
 .vscode
+# .codex/ is local-only; remove from ignore if repo content lives there
