@@ -26,7 +26,7 @@ $hitCount = 0
 $files = Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue |
   Where-Object {
     $full = $_.FullName
-    $parts = $full -split [IO.Path]::DirectorySeparatorChar
+    $parts = $full.Split([IO.Path]::DirectorySeparatorChar)
     $parts -notcontains '.git'
   }
 
