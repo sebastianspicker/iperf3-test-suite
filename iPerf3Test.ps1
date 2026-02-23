@@ -11,7 +11,10 @@ NOTE:
 - CSV is produced via Export-Csv to guarantee consistent columns/quoting.
 - Defaults are taken from the module (single source); only explicitly passed parameters override.
 - Run as script (pwsh -File). Do not dot-source to avoid leaking StrictMode/ErrorActionPreference.
-#>
+if ($MyInvocation.InvocationName -eq '.') {
+  Write-Error "This script should not be dot-sourced. Please run it as a script file (e.g., pwsh -File iPerf3Test.ps1)."
+  return
+}
 
 [CmdletBinding()]
 param(

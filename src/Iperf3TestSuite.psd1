@@ -5,7 +5,7 @@
   Author = 'iperf3-test-suite'
   CompanyName = ''
   Copyright = ''
-  Description = 'PowerShell iperf3 test suite runner (CSV/JSON artifacts, DSCP marking, optional MTU probe).'
+  Description = 'iperf3 Test Suite for Windows (PowerShell). Requires Windows (ping.exe, Test-NetConnection). iperf3 test suite runner (CSV/JSON artifacts, DSCP marking, optional MTU probe).'
   PowerShellVersion = '7.0'
   CompatiblePSEditions = @('Core')
   FunctionsToExport = @('Invoke-Iperf3TestSuite', 'Get-Iperf3TestSuiteDefaultParameterSet')

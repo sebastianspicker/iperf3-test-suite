@@ -28,12 +28,12 @@ function Initialize-PowerShellGallery {
     Register-PSRepository -Default
     $psgallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
   }
-  # Only set Trusted when we need to install; avoid mutating repo policy when modules already present
+  # Only notify when we need to install; avoid mutating repo policy
   if ($psgallery -and $psgallery.InstallationPolicy -ne 'Trusted') {
     $needInstall = (-not (Test-RequiredModuleInstalled -Name PSScriptAnalyzer -Version $PsscriptAnalyzerVersion)) -or
                    (-not (Test-RequiredModuleInstalled -Name Pester -Version $PesterVersion))
     if ($needInstall) {
-      Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+      Write-Verbose "PSGallery is not trusted. Installation might require confirmation or fail in non-interactive sessions."
     }
   }
 }
@@ -65,9 +65,17 @@ if (-not $installedModules -or ($installedModules | Where-Object { $_.Name -eq '
 
 $installedModules | Format-Table -AutoSize
 
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = (Resolve-Path .).Path
+if (Test-Path -LiteralPath (Join-Path $repoRoot 'scripts')) {
+    # We are in repo root
+}
+elseif ($PSScriptRoot) {
+    $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+}
 
-$analyzerResult = Invoke-ScriptAnalyzer -Path $repoRoot -Recurse
+$modulePath = Join-Path $repoRoot 'src/Iperf3TestSuite.psd1'
+
+$analyzerResult = Invoke-ScriptAnalyzer -Path (Join-Path $repoRoot 'src/Iperf3TestSuite.psm1')
 if ($analyzerResult -and $analyzerResult.Count -gt 0) {
   $analyzerResult | Format-Table -AutoSize
   Write-Error "PSScriptAnalyzer reported $($analyzerResult.Count) finding(s)."

@@ -1,10 +1,18 @@
 $ErrorActionPreference = 'Stop'
 
 BeforeAll {
-  $modulePath = Join-Path $PSScriptRoot '../src/Iperf3TestSuite.psd1'
+  $repoRoot = (Get-Item .).FullName
+  if (Test-Path -LiteralPath (Join-Path $repoRoot 'scripts')) {
+      # We are in repo root
+  }
+  elseif ($PSScriptRoot) {
+      $repoRoot = (Get-Item $PSScriptRoot).Parent.FullName
+  }
+  $modulePath = Join-Path $repoRoot 'src/Iperf3TestSuite.psd1'
   Import-Module $modulePath -Force
   $script:TestCapability = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
   $global:Iperf3TestSuite_TestCapability = $script:TestCapability
+  $global:IsWindows = $true # Mock for tests on non-Windows
 }
 
 function New-TestCapability {
@@ -225,7 +233,15 @@ Describe 'Iperf3TestSuite helpers' {
         Mock Test-TcpPortAndTrace { throw 'Should not be called' }
         Mock Invoke-Iperf3 { throw 'Should not be called' }
 
+        $global:IsWindows = $true
         Should -Throw -ActualValue { Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet } -ExpectedMessage "ICMP reachability*"
+      }
+    }
+
+    It 'throws on non-Windows' {
+      InModuleScope Iperf3TestSuite {
+        $global:IsWindows = $false
+        Should -Throw -ActualValue { Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet } -ExpectedMessage "*only supported on Windows*"
       }
     }
 
@@ -270,10 +286,11 @@ Describe 'Iperf3TestSuite helpers' {
             [string]$Win,
             [string]$UdpBw,
             [int]$ConnectTimeoutMs,
-            [pscustomobject]$Caps
+            [pscustomobject]$Caps,
+            [scriptblock]$Runner
           )
 
-          $null = $Server, $Port, $Stack, $Duration, $Omit, $Tos, $Dir, $Streams, $Win, $ConnectTimeoutMs, $Caps
+          $null = $Server, $Port, $Stack, $Duration, $Omit, $Tos, $Dir, $Streams, $Win, $ConnectTimeoutMs, $Caps, $Runner
 
           if ($Proto -eq 'UDP') {
             $script:udpBws.Add($UdpBw) | Out-Null
@@ -304,6 +321,7 @@ Describe 'Iperf3TestSuite helpers' {
 
         $script:udpBws | Where-Object { $_ -eq '2M' } | Should -BeNullOrEmpty
         $script:udpBws.Count | Should -BeGreaterOrEqual 1
+        $script:udpBws[0] | Should -Be '1M'  # Verify first bandwidth was tried
       }
     }
   }

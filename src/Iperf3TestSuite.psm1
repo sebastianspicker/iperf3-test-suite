@@ -33,11 +33,94 @@ function Get-Iperf3TestSuiteDefaultParameterSet {
   return $h
 }
 
+function Test-ValidHostnameOrIP {
+  <#
+  .SYNOPSIS
+  Validates that a string is a valid hostname or IP address.
+
+  .DESCRIPTION
+  Performs strict validation to prevent argument injection attacks by ensuring
+  the input is a valid hostname, IPv4 address, or IPv6 address. This prevents
+  passing flags like --config-file or other arguments that iperf3/ping might recognize.
+
+  .PARAMETER Name
+  The hostname or IP address string to validate.
+
+  .OUTPUTS
+  [bool] Returns $true if the input is a valid hostname or IP address, $false otherwise.
+  #>
+  [CmdletBinding()]
+  [OutputType([bool])]
+  param(
+    [Parameter(Mandatory)]
+    [string]$Name
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Name)) {
+    return $false
+  }
+
+  # Block any input that starts with a dash (could be a flag)
+  if ($Name -match '^-') {
+    return $false
+  }
+
+  # Valid hostname: alphanumeric, hyphens (not at start/end), dots for subdomains
+  # Each label: 1-63 chars, starts/ends with alphanumeric
+  if ($Name -match '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$') {
+    return $true
+  }
+
+  # Valid IPv4: four octets 0-255 separated by dots
+  if ($Name -match '^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$') {
+    $octets = $Name.Split('.')
+    foreach ($octet in $octets) {
+      $val = [int]$octet
+      if ($val -lt 0 -or $val -gt 255) {
+        return $false
+      }
+    }
+    return $true
+  }
+
+  # Valid IPv6: simplified pattern for common formats
+  # Full form: 8 groups of 4 hex digits, or compressed form with ::
+  # Also allow bracketed form [IPv6] used by some tools
+  $ipv6Pattern = '^\[?([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\]?$|^\[?([0-9a-fA-F]{1,4}:){1,7}:?\]?$|^\[?:(:[0-9a-fA-F]{1,4}){1,7}\]?$|^\[?([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}\]?$|^\[?([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}\]?$|^\[?([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}\]?$|^\[?([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}\]?$|^\[?([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}\]?$|^\[?[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})\]?$|^\[?:((:[0-9a-fA-F]{1,4}){1,7}|:)\]?$|^\[?::(ffff(:0{1,4}){0,1}:){0,1}(\d{1,3}\.){3}\d{1,3}\]?$'
+  if ($Name -match $ipv6Pattern) {
+    return $true
+  }
+
+  # Also accept simple IPv6 patterns (e.g., ::1, fe80::1, full addresses)
+  if ($Name -match '^\[?[0-9a-fA-F:]+\]?$' -and $Name -replace '\[|\]', '' -match ':') {
+    # Basic validation: contains only hex digits and colons (and optional brackets)
+    $cleanName = $Name -replace '\[|\]', ''
+    # Must have at least one colon for IPv6
+    if ($cleanName -match '^[0-9a-fA-F:]+$' -and $cleanName -match ':') {
+      # Allow :: shorthand
+      return $true
+    }
+  }
+
+  return $false
+}
+
 function New-Iperf3Metric {
   [CmdletBinding()]
   [OutputType([pscustomobject])]
   param()
   [pscustomobject]@{ TxMbps = $null; RxMbps = $null; Retr = $null; LossPct = $null; JitterMs = $null }
+}
+
+function Get-BitsPerSecondMbps {
+  [CmdletBinding()]
+  [OutputType([double])]
+  param(
+    [Parameter(Mandatory)]
+    [object]$Obj
+  )
+  if (-not $Obj -or $Obj.PSObject.Properties.Name -notcontains 'bits_per_second') { return $null }
+  [math]::Round(($Obj.bits_per_second / 1e6), 2)
 }
 
 function Get-TosFromDscpClass {
@@ -89,9 +172,14 @@ function ConvertTo-MbitPerSecond {
   $n = [double]$m.Groups['n'].Value
   $u = $m.Groups['u'].Value.ToLowerInvariant()
 
+  # If unit is missing, we treat it as M (Mbit/s) to match iperf3-test-suite internal logic,
+  # but we MUST ensure it's passed as such to iperf3 later.
+  if ([string]::IsNullOrEmpty($u)) { $u = 'm' }
+
   switch ($u) {
     'g' { return [math]::Round($n * 1000, 3) }
     'k' { return [math]::Round($n / 1000, 3) }
+    'm' { return [math]::Round($n, 3) }
     default { return [math]::Round($n, 3) }
   }
 }
@@ -107,10 +195,19 @@ function Test-Reachability {
     [string]$Mode
   )
 
+  if (-not $IsWindows) {
+    throw "Test-Reachability is currently only supported on Windows due to dependency on ping.exe or Test-Connection behaviors."
+  }
+
   $stacksToTry = switch ($Mode) {
     'IPv4' { @('IPv4') }
     'IPv6' { @('IPv6') }
     default { @('IPv4', 'IPv6') }
+  }
+
+  # Strict validation for ComputerName to prevent argument injection
+  if (-not (Test-ValidHostnameOrIP -Name $ComputerName)) {
+    throw "Invalid ComputerName: '$ComputerName'. Must be a valid hostname or IP address."
   }
 
   foreach ($stack in $stacksToTry) {
@@ -157,7 +254,7 @@ function Test-TcpPortAndTrace {
     $tcp = Test-NetConnection -ComputerName $ComputerName -Port $Port -InformationLevel Detailed -ErrorAction Stop
   }
   catch {
-    return [pscustomobject]@{ Tcp = $null; Trace = $null }
+    Write-Verbose "TCP port $Port check failed: $($_.Exception.Message)"
   }
 
   try {
@@ -186,6 +283,15 @@ function Test-MtuPayload {
     [int[]]$Sizes
   )
 
+  if (-not $IsWindows) {
+    throw "Test-MtuPayload is currently only supported on Windows due to dependency on ping.exe."
+  }
+
+  # Strict validation for ComputerName to prevent argument injection
+  if (-not (Test-ValidHostnameOrIP -Name $ComputerName)) {
+    throw "Invalid ComputerName: '$ComputerName'. Must be a valid hostname or IP address."
+  }
+
   $fails = New-Object System.Collections.Generic.List[int]
   foreach ($sz in $Sizes) {
     $pingArgs = if ($Stack -eq 'IPv4') {
@@ -207,8 +313,10 @@ function Get-Iperf3Capability {
   [OutputType([pscustomobject])]
   param()
 
-  $verText = (& iperf3 --version 2>&1 | Select-Object -First 1)
+  # Capture $LASTEXITCODE immediately after native command, before any pipeline operations
+  $verOutput = & iperf3 --version 2>&1
   $capExit = $LASTEXITCODE
+  $verText = $verOutput | Select-Object -First 1
   if ($capExit -ne 0) {
     $verText = "iperf3 --version failed (exit code $capExit): $verText"
   }
@@ -245,11 +353,27 @@ function Get-JsonSubstringOrNull {
     return $null
   }
 
-  $maxLen = 2MB
+  # Heuristic: Find first '{' and last '}'
+  $first = $Text.IndexOf('{')
+  $last = $Text.LastIndexOf('}')
+
+  if ($first -ge 0 -and $last -gt $first) {
+    $candidate = $Text.Substring($first, $last - $first + 1)
+    try {
+      $null = ConvertFrom-Json -InputObject $candidate -ErrorAction Stop
+      return $candidate
+    }
+    catch {
+      Write-Verbose "Broad JSON extraction failed; falling back to deep scan."
+    }
+  }
+
+  $maxLen = 1MB
   if ($Text.Length -gt $maxLen) {
     $Text = $Text.Substring(0, $maxLen)
   }
 
+  # Fallback: Nested brace scan for first valid JSON object
   $depth = 0
   $start = -1
   $inString = $false
@@ -260,7 +384,7 @@ function Get-JsonSubstringOrNull {
     $c = $Text[$i]
     if ($inString) {
       if ($escape) { $escape = $false }
-      elseif ($c -eq '\') { $escape = $true }
+      elseif ($c -eq '\') { $escape = $true }  # Backslash escapes the next character in JSON strings
       elseif ($c -eq $quote) { $inString = $false }
       $i++
       continue
@@ -286,7 +410,7 @@ function Get-JsonSubstringOrNull {
           return $candidate
         }
         catch {
-          Write-Verbose "Candidate substring is not valid JSON; continuing."
+          # Keep searching
         }
       }
       $i++
@@ -336,9 +460,20 @@ function Invoke-Iperf3 {
     [scriptblock]$Runner
   )
 
+  # Strict validation for Server to prevent argument injection
+  if (-not (Test-ValidHostnameOrIP -Name $Server)) {
+    throw "Invalid Server: '$Server'. Must be a valid hostname or IP address."
+  }
+
   $iperfArgs = @('-c', $Server, '-p', $Port, '-t', $Duration, '-O', $Omit, '-J', '--connect-timeout', $ConnectTimeoutMs)
   if ($Stack -eq 'IPv6') { $iperfArgs += '-6' }
   if ($Tos -gt 0) { $iperfArgs += @('-S', $Tos) }
+
+  # Ensure bandwidth always has a unit for iperf3
+  $udpBwStr = $UdpBw
+  if ($udpBwStr -notmatch '[kKmMgG]$') {
+    $udpBwStr = "${udpBwStr}M"
+  }
 
   if ($Proto -eq 'TCP') {
     if ($Dir -eq 'RX') { $iperfArgs += '-R' }
@@ -350,7 +485,7 @@ function Invoke-Iperf3 {
     if ($Win -ne 'default') { $iperfArgs += @('-w', $Win) }
   }
   else {
-    $iperfArgs += @('-u', '-b', $UdpBw)
+    $iperfArgs += @('-u', '-b', $udpBwStr)
     if ($Dir -eq 'RX') { $iperfArgs += '-R' }
     if ($Dir -eq 'BD') {
       if ($Caps.BidirSupported) { $iperfArgs += '--bidir' }
@@ -358,12 +493,17 @@ function Invoke-Iperf3 {
     }
   }
 
+  # Execute iperf3 or custom Runner.
+  # NOTE: When using a custom Runner scriptblock, the Runner is responsible for setting
+  # $global:LASTEXITCODE if it wraps a native command. Otherwise, $LASTEXITCODE may not
+  # reflect the actual exit code of the iperf3 process.
   if ($null -ne $Runner) {
     $rawLines = & $Runner -IperfArgs $iperfArgs 2>&1
   }
   else {
     $rawLines = & iperf3 @iperfArgs 2>&1
   }
+  # Capture $LASTEXITCODE immediately after native command, before any pipeline operations
   $exitCode = $LASTEXITCODE
   $rawText = $rawLines | Out-String
 
@@ -428,12 +568,6 @@ function Get-Iperf3Metric {
   $loss = $null
   $jit = $null
 
-  function Get-BitsPerSecondMbps {
-    param([object]$Obj)
-    if (-not $Obj -or $Obj.PSObject.Properties.Name -notcontains 'bits_per_second') { return $null }
-    [math]::Round(($Obj.bits_per_second / 1e6), 2)
-  }
-
   if ($Proto -eq 'TCP') {
     if ($Dir -eq 'TX' -or $Dir -eq 'BD') {
       $txMbps = Get-BitsPerSecondMbps -Obj $sumSent
@@ -465,8 +599,8 @@ function Get-Iperf3Metric {
     $rxMbps = Get-BitsPerSecondMbps -Obj $recvBps
   }
   elseif ($Dir -eq 'RX') {
-    $rxMbps = Get-BitsPerSecondMbps -Obj $recvBps
-    $txMbps = Get-BitsPerSecondMbps -Obj $sentBps
+    $txMbps = Get-BitsPerSecondMbps -Obj $recvBps
+    $rxMbps = Get-BitsPerSecondMbps -Obj $sentBps
   }
   else {
     $txMbps = Get-BitsPerSecondMbps -Obj $sentBps
@@ -661,15 +795,20 @@ function Invoke-Iperf3TestSuite {
   try {
     $null = Get-Command iperf3 -ErrorAction Stop
     $null = Get-Command ConvertFrom-Json -ErrorAction Stop
-    if ((-not $SkipReachabilityCheck -or -not $DisableMtuProbe) -and ($IsWindows -or $env:OS -match 'Windows')) {
+    # ping.exe is required if either reachability check or MTU probe is enabled
+    if ((-not ($SkipReachabilityCheck -and $DisableMtuProbe)) -and ($IsWindows -or $env:OS -match 'Windows')) {
       $pingCmd = Get-Command ping.exe -ErrorAction SilentlyContinue
       if (-not $pingCmd) {
         throw "ping.exe is required for reachability check or MTU probe but was not found. Use -SkipReachabilityCheck and -DisableMtuProbe to run without it (Windows only)."
       }
     }
 
+    if (-not $IsWindows) {
+      throw "Invoke-Iperf3TestSuite is currently only supported on Windows due to platform-specific tool dependencies (ping.exe, Test-NetConnection)."
+    }
+
     $ts = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
-    $null = New-Item -ItemType Directory -Path $OutDir -Force
+    $null = New-Item -ItemType Directory -LiteralPath $OutDir -Force
     $jsonPath = Join-Path -Path $OutDir -ChildPath "iperf3_results_$ts.json"
     $csvPath = Join-Path -Path $OutDir -ChildPath "iperf3_summary_$ts.csv"
 
@@ -740,6 +879,8 @@ function Invoke-Iperf3TestSuite {
       $max = ConvertTo-MbitPerSecond $UdpMax
       $step = [math]::Max((ConvertTo-MbitPerSecond $UdpStep), 1)
       if ($max -lt $cur) { $max = $cur }
+      # Safety limit: maximum UDP saturation iterations to prevent infinite loops
+      # even if loss threshold is never reached (e.g., due to parse failures)
       $maxUdpIterations = 1000
 
       foreach ($dir in @('TX', 'RX')) {
@@ -768,7 +909,7 @@ function Invoke-Iperf3TestSuite {
       }
     }
 
-    $csvRows | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+    $csvRows | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
 
     $final = [pscustomobject]@{
       Timestamp      = $ts
@@ -791,7 +932,7 @@ function Invoke-Iperf3TestSuite {
       Results        = $allResults.ToArray()
     }
 
-    $final | ConvertTo-Json -Depth 10 | Set-Content -Path $jsonPath -Encoding UTF8
+    $final | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
 
     if (-not $Quiet) {
       Write-Information -InformationAction Continue "CSV  : $csvPath"

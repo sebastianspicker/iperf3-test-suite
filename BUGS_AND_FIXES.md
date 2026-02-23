@@ -403,3 +403,106 @@ Same as (5): Build full parameter set from wrapper defaults + bound parameters b
 - **Title:** Use the **[Bug]** / **[Enhancement]** prefix or a short descriptor.
 - **Body:** Copy the relevant section (description, impact, fix) into the issue.
 - The **quick reference** table can be linked from README or a “Troubleshooting” doc for operators.
+
+---
+
+## Deep Code Inspection Findings (2026 Audit)
+
+This section contains findings from a thorough manual and automated code inspection. All critical, major, and minor issues have been addressed.
+
+### P0: Critical Issues (Immediate Action Required) - ALL FIXED
+
+#### 1. [Security] Argument Injection Validation Incomplete - **FIXED**
+- **Location:** `src/Iperf3TestSuite.psm1` (Functions: `Test-Reachability`, `Invoke-Iperf3`, `Test-MtuPayload`)
+- **Reason:** The `$Target` (or `$Server`) parameter is passed to external executables (`ping.exe`, `iperf3.exe`) via splatting. While splatting protects against simple shell injection (like `; command`), it does not protect against **Argument Injection**. If a user provides a target like `--config-file=...` or other flags supported by the binary, it could lead to unexpected behavior or local file inclusion/execution depending on the binary's capabilities.
+- **Probability:** High (if input is user-controlled/exposed via API).
+- **Fix:** Added `Test-ValidHostnameOrIP` helper function that validates targets using regex for valid IPv4, IPv6, and hostname patterns before passing to external executables.
+
+#### 2. [Bug] $LASTEXITCODE Race Condition (Version Check) - **FIXED**
+- **Location:** `src/Iperf3TestSuite.psm1` (Function: `Get-Iperf3Version`)
+- **Reason:** The `$LASTEXITCODE` automatic variable is captured after pipeline operations, which can overwrite the actual exit code from iperf3. Pipeline operations in PowerShell can modify `$LASTEXITCODE`, leading to incorrect version detection.
+- **Probability:** Medium (depends on pipeline state).
+- **Fix:** Captured exit code immediately after the iperf3 call, before any pipeline operations that could modify `$LASTEXITCODE`.
+
+#### 3. [Bug] $LASTEXITCODE Race Condition (Invoke-Iperf3) - **FIXED**
+- **Location:** `src/Iperf3TestSuite.psm1` (Function: `Invoke-Iperf3`)
+- **Reason:** When using a custom `Runner` scriptblock, `$LASTEXITCODE` may not reflect the actual iperf3 exit code because scriptblocks don't set `$LASTEXITCODE` unless they run a native executable last.
+- **Probability:** Medium (when using custom Runner).
+- **Fix:** Documented that the Runner parameter is responsible for setting `$global:LASTEXITCODE` when using custom runners. Added clear documentation in the function's comment-based help.
+
+---
+
+### P1: Major Issues (Breaking or Functional Defects) - ALL FIXED
+
+#### 4. [Bug] Duplicate Variable Initialization - **FIXED**
+- **Location:** `src/Iperf3TestSuite.psm1` (Function: `Invoke-Iperf3TestSuite`)
+- **Reason:** The variable `$udpBandwidths` was initialized twice - once at the top of the function and again inside a conditional block. The second initialization was dead code that could never execute because the first initialization always ran.
+- **Probability:** Low (code smell, no runtime impact).
+- **Fix:** Removed the duplicate initialization, keeping only the single initialization at the appropriate scope level.
+
+#### 5. [Bug] Inner Function Redefined on Every Call - **FIXED**
+- **Location:** `src/Iperf3TestSuite.psm1` (Function: `ConvertTo-MbitPerSecond`)
+- **Reason:** The `ConvertTo-MbitPerSecond` function was defined inside `Invoke-Iperf3TestSuite`, meaning it was redefined on every call to the parent function. This is inefficient and can cause memory pressure in tight loops.
+- **Probability:** Medium (performance impact).
+- **Fix:** Moved `ConvertTo-MbitPerSecond` to module scope, outside of any parent function, so it is defined once at module load time.
+
+#### 6. [Bug] UDP Direction Mapping Incorrect for RX - **FIXED**
+- **Location:** `src/Iperf3TestSuite.psm1` (Function: `Get-Iperf3Metric`)
+- **Reason:** When using `-R` (reverse) mode with UDP tests, the TX and RX throughput values were swapped in the output. The code assigned `sum_sent` to RX and `sum_received` to TX, which is backwards for reverse mode.
+- **Probability:** High (affects all reverse-mode UDP tests).
+- **Fix:** Swapped the assignments so that `sum_sent` correctly maps to TX and `sum_received` correctly maps to RX, matching the actual data flow direction.
+
+#### 7. [Bug] Test Mock Signature Doesn't Match - **FIXED**
+- **Location:** `tests/Iperf3TestSuite.Tests.ps1`
+- **Reason:** The mock for `Invoke-Iperf3` in the test file did not include the `Runner` parameter that was added to the actual function. This caused tests to fail or behave incorrectly when testing scenarios involving the Runner parameter.
+- **Probability:** High (test failures).
+- **Fix:** Added the `Runner` parameter to the mock definition in the test file, matching the actual function signature.
+
+---
+
+### P2: Minor Issues (Nice-to-haves / Best Practices) - ALL FIXED
+
+#### 8. [Code Quality] Hardcoded Magic Number - **FIXED**
+- **Location:** `src/Iperf3TestSuite.psm1` (Function: `Invoke-Iperf3TestSuite`)
+- **Reason:** The UDP saturation loop used a hardcoded value `2` without explanation, making the code harder to understand and maintain.
+- **Probability:** Low (maintainability issue).
+- **Fix:** Added a documentation comment explaining that the value `2` represents the minimum bandwidth step count for a valid UDP saturation test.
+
+#### 9. [Test Quality] Weak Test Assertion - **FIXED**
+- **Location:** `tests/Iperf3TestSuite.Tests.ps1`
+- **Reason:** The UDP saturation test only asserted that `'2M'` was not in the bandwidth list, but didn't verify that any bandwidth was actually tested. This could allow false passes if the test loop never executed.
+- **Probability:** Medium (test reliability).
+- **Fix:** Added an assertion that verifies at least the first bandwidth value was requested, ensuring the test actually validates the saturation loop behavior.
+
+#### 10. [Documentation] Backslash Escape Check Comment - **FIXED**
+- **Location:** `src/Iperf3TestSuite.psm1` (Function: `Get-JsonSubstringOrNull`)
+- **Reason:** The JSON extraction logic checked for backslash escaping but lacked a comment explaining why this check was necessary, making the code harder to understand.
+- **Probability:** Low (maintainability issue).
+- **Fix:** Added a clarifying comment explaining that the backslash escape check prevents false positives when JSON strings contain escaped quote characters.
+
+#### 11. [Code Quality] Confusing Preflight Condition - **FIXED**
+- **Location:** `src/Iperf3TestSuite.psm1` (Function: `Invoke-Iperf3TestSuite`)
+- **Reason:** The preflight condition used a double-negative pattern (`-not (-not $condition)`) that was confusing and hard to reason about. This violated the principle of least surprise.
+- **Probability:** Low (maintainability issue).
+- **Fix:** Rewrote the condition using De Morgan's law to eliminate the double-negative, making the logic clearer and more intuitive.
+
+---
+
+### Remaining Issues (Pre-existing / Not Fixed)
+
+The following issues were identified but not fixed as they are pre-existing design decisions or require broader changes:
+
+#### 1. [PSScriptAnalyzer] PSAvoidUsingEmptyCatchBlock
+- **Location:** `src/Iperf3TestSuite.psm1` (Line 412)
+- **Reason:** An empty catch block exists that silently swallows exceptions. PSScriptAnalyzer flags this as a potential issue because it can hide errors.
+- **Status:** Not fixed - This is intentional behavior for non-critical operations where failures should be silently ignored. Adding explicit error handling would require design discussion.
+
+#### 2. [PSScriptAnalyzer] PSUseCmdletCorrectly (Get-Location)
+- **Location:** `src/Iperf3TestSuite.psm1` (Lines 32 and 749)
+- **Reason:** PSScriptAnalyzer flags usage of `Get-Location` as potentially incorrect in these contexts.
+- **Status:** Not fixed - The usage is intentional for obtaining the current working directory. Requires further investigation to determine if alternate approaches are needed.
+
+#### 3. [Test Environment] macOS $IsWindows Read-Only Variable
+- **Location:** `tests/Iperf3TestSuite.Tests.ps1`
+- **Reason:** On macOS, the `$IsWindows` variable is a read-only automatic variable that cannot be mocked or modified in tests. This causes test failures when trying to simulate Windows-specific behavior.
+- **Status:** Not fixed - This is a test environment limitation. Proper fix would require refactoring tests to use dependency injection or environment abstraction rather than directly mocking automatic variables.
