@@ -1,12 +1,12 @@
 ## Summary
 
 ## Changes
-- 
 
-## Testing
+## Validation
 - [ ] `pwsh -NoProfile -File .\scripts\Invoke-QualityGates.ps1`
+- [ ] Manual smoke test done (CLI or GUI as relevant)
 
 ## Checklist
-- [ ] No behavior changes beyond the stated scope
-- [ ] Documentation updated if needed
-- [ ] Security considerations reviewed
+- [ ] Backward compatibility preserved (or migration documented)
+- [ ] Documentation updated
+- [ ] Security and path-handling implications reviewed

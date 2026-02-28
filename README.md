@@ -1,140 +1,122 @@
 # iperf3 Test Suite (PowerShell)
 
-Windows-focused iperf3 client test runner for PowerShell 7+. It executes a TCP/UDP test matrix (with DSCP marking), optional MTU payload probing, and writes timestamped CSV + JSON artifacts.
+Windows-first iperf3 client test suite for PowerShell 7+.
+It runs TCP/UDP matrices with DSCP, writes CSV/JSON artifacts, and now includes profile management, strict configuration mode, deterministic CLI exit codes, and supplemental run summaries/reports.
 
 ## Features
-- TCP/UDP test matrix with DSCP marking (`-S` / ToS/TClass)
-- Optional MTU payload probe via `ping.exe`
-- IPv4/IPv6 auto-detection or forced stack
-- CSV + JSON output artifacts with consistent columns
-- Offline Pester tests (no iperf3/network required)
+- TCP/UDP matrix execution with DSCP (`-S`) support
+- Optional MTU payload probe
+- IPv4/IPv6 auto or forced stack
+- Profile system: save/load/list reusable run configurations
+- CLI profile deletion (`-DeleteProfile`)
+- Strict configuration validation (`-StrictConfiguration`)
+- Deterministic CLI exit-code mapping for CI automation
+- Additive supplemental outputs:
+  - `iperf3_summary_<TIMESTAMP>.json`
+  - `iperf3_report_<TIMESTAMP>.md`
+  - `iperf3_run_index.json` (last-run pointer)
+- Windows Forms GUI with tabs:
+  - `Run`
+  - `Profiles`
+  - `Reports`
 
 ## Requirements
 - PowerShell 7+ (`pwsh`)
-- Windows host with networking tools (`Test-NetConnection`, `ping.exe`) unless using `-SkipReachabilityCheck` and `-DisableMtuProbe`
-- iperf3 client **3.7+** (for `-J`, `--connect-timeout`; `--bidir` needs 3.7+)
-- Reachable iperf3 server (`iperf3 -s`) on the target
+- Windows host for full feature set (`Test-NetConnection`, `ping.exe`, WinForms GUI)
+- iperf3 client 3.7+
+- Reachable iperf3 server (`iperf3 -s`)
 
-Run the CLI with `pwsh -File`; do not dot-source the script (to avoid leaking `StrictMode`/`ErrorActionPreference` into the caller).
-
-## Repo layout
-- `iPerf3Test.ps1` — CLI entrypoint (wraps the module)
-- `src/Iperf3TestSuite.psm1` — implementation module
-- `src/Iperf3TestSuite.psd1` — module manifest
-- `tests/Iperf3TestSuite.Tests.ps1` — offline Pester tests
-- `scripts/Invoke-QualityGates.ps1` — ScriptAnalyzer + Pester
-- `scripts/ci-local.sh` — run same checks as CI (requires Bash: WSL, Git Bash, or macOS/Linux)
-- `BUGS_AND_FIXES.md` — known issues and required fixes (use for opening GitHub issues)
-- `CHANGELOG.md` — version history
-
-## Quickstart
-
+## Quickstart (CLI)
 ```powershell
 pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -Port 5201
 ```
 
-Common options:
-
+### Useful options
 ```powershell
-# Override output dir
-pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -OutDir .\logs
+# Preview without execution
+pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -WhatIf
 
-# Force IPv4 (or IPv6)
-pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -IpVersion IPv4
-
-# Disable MTU payload probe
-pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -DisableMtuProbe
-
-# Skip ICMP reachability (proceed when only TCP port is open)
+# Skip ICMP reachability check
 pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -SkipReachabilityCheck
+
+# Strict config validation (unknown/invalid config keys become hard errors)
+pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -StrictConfiguration
+
+# Open output folder after run/preview (Windows)
+pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -OpenOutputFolder
 ```
 
-## Configuration (Key Parameters)
-This list is not exhaustive; see the script help for all options.
+## Profiles
+```powershell
+# Save current parameters as profile "lab"
+pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -ProfileName lab -SaveProfile -WhatIf
 
-- `-Target` (required): iperf3 server hostname or IP.
-- `-Port` (default `5201`): iperf3 server port.
-- `-Duration` (default `10`): test duration per run.
-- `-Omit` (default `1`): omit seconds at test start.
-- `-IpVersion` (`Auto|IPv4|IPv6`): network stack selection.
-- `-DisableMtuProbe`: skip MTU payload probing.
-- `-SkipReachabilityCheck`: skip ICMP; proceed when TCP port check succeeds (useful when ping is blocked).
-- `-DscpClasses`: DSCP classes to test (e.g., `CS0`, `AF11`, `EF`).
-- `-TcpStreams`, `-TcpWindows`: TCP stream/window matrices.
-- `-UdpStart`, `-UdpMax`, `-UdpStep`: UDP bandwidth sweep (Mbit/s, `K/M/G`).
-- `-UdpLossThreshold`: break UDP sweep on loss percentage.
-- `-OutDir`: output directory for CSV/JSON.
-- `-Progress`: print per-test progress (e.g. "Running test N ...").
-- `-Summary`: print total test count at the end (with CSV/JSON paths).
+# List profiles
+pwsh -File .\iPerf3Test.ps1 -ListProfiles
 
-## Output
-By default outputs to `./logs` (timestamp includes subsecond to avoid overwrites):
+# Delete a profile
+pwsh -File .\iPerf3Test.ps1 -DeleteProfile lab
+
+# Run with profile (CLI args override profile values)
+pwsh -File .\iPerf3Test.ps1 -ProfileName lab -Target "iperf3.example.com"
+```
+
+Optional profile file override:
+```powershell
+pwsh -File .\iPerf3Test.ps1 -ListProfiles -ProfilesFile .\.iperf3\profiles.json
+```
+
+## Configuration file
+Use `-ConfigurationPath` to merge JSON defaults before explicit CLI args.
+Unknown keys are warnings by default, or hard errors with `-StrictConfiguration`.
+
+## Outputs
+Standard outputs (unchanged format/fields):
 - `iperf3_summary_<TIMESTAMP>.csv`
 - `iperf3_results_<TIMESTAMP>.json`
 
-## Development
-Import the module directly:
+Supplemental additive outputs:
+- `iperf3_summary_<TIMESTAMP>.json` (compact machine summary)
+- `iperf3_report_<TIMESTAMP>.md` (human-readable report)
+- `iperf3_run_index.json` (latest run metadata in output folder)
 
+## CLI exit codes
+- `0`: successful run / successful non-run mode (WhatIf/ListProfiles)
+- `11`: input/config validation error
+- `12`: prerequisite/environment error
+- `13`: connectivity precheck error
+- `14`: run completed with partial failures
+- `15`: run completed with total failures
+- `16`: internal/unclassified error
+
+## GUI
 ```powershell
-pwsh -NoProfile -Command "Import-Module .\src\Iperf3TestSuite.psd1 -Force"
+pwsh -File .\iPerf3Test-GUI.ps1
 ```
 
-Run quality gates (installs missing modules for the current user):
+Capabilities:
+- Run/WhatIf from `Run` tab
+- Validation feedback via inline error indicators
+- Profile save/load/delete/list in `Profiles` tab
+- Quick-open summary/report/output paths in `Reports` tab
+- Progress bar and status line during execution
+- Cancel button for running jobs
 
+## Development and quality
+See [DEVELOPMENT.md](DEVELOPMENT.md) for local workflows.
+
+One-command quality gate:
 ```powershell
 pwsh -NoProfile -File .\scripts\Invoke-QualityGates.ps1
 ```
 
-## Testing / Quality Gates
-If the modules are missing, install pinned versions for the current user:
-
-```powershell
-pwsh -NoProfile -Command "Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Scope CurrentUser -Force; Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force"
-```
-
-Run ScriptAnalyzer:
-
-```powershell
-pwsh -NoProfile -Command "Invoke-ScriptAnalyzer -Path . -Recurse"
-```
-
-Run Pester:
-
-```powershell
-pwsh -NoProfile -Command "Invoke-Pester"
-```
-
-## Security
-Lightweight secret scan (no output of matches); path-agnostic .git exclusion:
-
-```powershell
-pwsh -NoProfile -File .\scripts\Invoke-SecretScan.ps1
-```
-
-Dependency inventory (PowerShell modules):
-
-```powershell
-pwsh -NoProfile -Command "Get-InstalledModule PSScriptAnalyzer,Pester | Select-Object Name, Version, Repository | Format-Table -AutoSize"
-```
-
-## Validation (build / run / test)
-No build step (PowerShell module + script only). Use these to verify the repo:
-
-| Action | Command |
-|--------|---------|
-| **Lint** | `pwsh -NoProfile -Command "Invoke-ScriptAnalyzer -Path . -Recurse"` |
-| **Tests** | `pwsh -NoProfile -Command "Invoke-Pester"` |
-| **Quality gates** (lint + tests; installs modules if missing) | `pwsh -NoProfile -File .\scripts\Invoke-QualityGates.ps1` |
-| **Same as CI** (Bash) | `./scripts/ci-local.sh` |
-| **Run suite** (requires iperf3 server) | `pwsh -File .\iPerf3Test.ps1 -Target "iperf3.example.com" -Port 5201` |
-
-See [BUGS_AND_FIXES.md](BUGS_AND_FIXES.md) for known limitations and troubleshooting.
-
-## Troubleshooting
-- `iperf3` not found: Ensure the iperf3 client is installed and in `PATH`.
-- Reachability failures: By default ICMP must succeed; use `-SkipReachabilityCheck` when only TCP is open. Verify firewall and server.
-- ScriptAnalyzer warnings on non-Windows: Run checks on Windows or adjust rules for your environment.
-- Missing JSON output: Confirm iperf3 supports `-J` and check for stderr output in `RawText`.
+## Repository layout
+- `iPerf3Test.ps1` — CLI entrypoint
+- `iPerf3Test-GUI.ps1` — WinForms GUI
+- `src/Iperf3TestSuite.psm1` — module entrypoint
+- `src/Private/*.ps1` — private helpers (validation, profiles, reporting, orchestration, run logic)
+- `tests/Iperf3TestSuite.Tests.ps1` — Pester tests
+- `scripts/Invoke-QualityGates.ps1` — analyzer + tests + secret scan
 
 ## License
 See [LICENSE](LICENSE).

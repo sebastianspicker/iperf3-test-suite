@@ -11,14 +11,13 @@ labels: bug
 - PowerShell version:
 - iperf3 version:
 
-## Steps to Reproduce
+## Steps to reproduce
 1.
 2.
 3.
 
-## Expected Behavior
+## Expected behavior
 
-## Actual Behavior
+## Actual behavior
 
-## Logs / Output
-Paste relevant output (redact any secrets).
+## Logs (redact secrets)

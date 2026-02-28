@@ -1,18 +1,18 @@
 $ErrorActionPreference = 'Stop'
 
 BeforeAll {
-  $repoRoot = (Get-Item .).FullName
-  if (Test-Path -LiteralPath (Join-Path $repoRoot 'scripts')) {
-      # We are in repo root
-  }
-  elseif ($PSScriptRoot) {
-      $repoRoot = (Get-Item $PSScriptRoot).Parent.FullName
-  }
+  . (Join-Path (Get-Item $PSScriptRoot).Parent.FullName 'scripts/Get-RepoRoot.ps1')
+  $repoRoot = Get-RepoRoot
+  $script:RepoRoot = $repoRoot
   $modulePath = Join-Path $repoRoot 'src/Iperf3TestSuite.psd1'
   Import-Module $modulePath -Force
   $script:TestCapability = [pscustomobject]@{ VersionText = 'iperf3 3.9'; Major = 3; Minor = 9; BidirSupported = $true }
   $global:Iperf3TestSuite_TestCapability = $script:TestCapability
-  $global:IsWindows = $true # Mock for tests on non-Windows
+  try {
+    $global:IsWindows = $true
+  } catch {
+    Write-Verbose 'On some hosts (e.g. macOS) $IsWindows is read-only; Windows-only tests may fail or be skipped.'
+  }
 }
 
 function New-TestCapability {
@@ -50,6 +50,15 @@ Describe 'Iperf3TestSuite helpers' {
     It 'throws on unknown DSCP class' {
       InModuleScope Iperf3TestSuite {
         { Get-TosFromDscpClass -Class 'NOPE' } | Should -Throw "Unknown DSCP class*"
+      }
+    }
+  }
+
+  Context 'Hostname/IP validation' {
+    It 'rejects invalid IPv6-like strings (e.g. :::)' {
+      InModuleScope Iperf3TestSuite {
+        Test-ValidHostnameOrIP -Name ':::' | Should -Be $false
+        Test-ValidHostnameOrIP -Name ':' | Should -Be $false
       }
     }
   }
@@ -171,17 +180,10 @@ Describe 'Iperf3TestSuite helpers' {
       $captured = InModuleScope Iperf3TestSuite {
         $script:captured = $null
         $caps = $global:Iperf3TestSuite_TestCapability
-        $runner = {
-          param([string[]]$IperfArgs)
-          $script:captured = $IperfArgs
-          $global:LASTEXITCODE = 0
-          return '{"end":{}}'
-        }
-        $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 `
-          -Proto 'TCP' -Dir 'RX' -Caps $caps -Runner $runner
+        $runner = { param([string[]]$IperfArgs); $script:captured = $IperfArgs; $global:LASTEXITCODE = 0; return '{"end":{}}' }
+        $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 -Proto 'TCP' -Dir 'RX' -Caps $caps -Runner $runner
         return $script:captured
       }
-
       $captured | Should -Contain '-R'
     }
 
@@ -189,17 +191,10 @@ Describe 'Iperf3TestSuite helpers' {
       $captured = InModuleScope Iperf3TestSuite {
         $script:captured = $null
         $caps = $global:Iperf3TestSuite_TestCapability
-        $runner = {
-          param([string[]]$IperfArgs)
-          $script:captured = $IperfArgs
-          $global:LASTEXITCODE = 0
-          return '{"end":{}}'
-        }
-        $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 `
-          -Proto 'TCP' -Dir 'BD' -Caps $caps -Runner $runner
+        $runner = { param([string[]]$IperfArgs); $script:captured = $IperfArgs; $global:LASTEXITCODE = 0; return '{"end":{}}' }
+        $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 -Proto 'TCP' -Dir 'BD' -Caps $caps -Runner $runner
         return $script:captured
       }
-
       $captured | Should -Contain '--bidir'
     }
 
@@ -207,17 +202,10 @@ Describe 'Iperf3TestSuite helpers' {
       $captured = InModuleScope Iperf3TestSuite {
         $script:captured = $null
         $caps = $global:Iperf3TestSuite_TestCapability
-        $runner = {
-          param([string[]]$IperfArgs)
-          $script:captured = $IperfArgs
-          $global:LASTEXITCODE = 0
-          return '{"end":{}}'
-        }
-        $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 `
-          -Proto 'UDP' -Dir 'TX' -UdpBw '5M' -Caps $caps -Runner $runner
+        $runner = { param([string[]]$IperfArgs); $script:captured = $IperfArgs; $global:LASTEXITCODE = 0; return '{"end":{}}' }
+        $null = Invoke-Iperf3 -Server 'example' -Port 5201 -Stack 'IPv4' -Duration 1 -Omit 0 -Proto 'UDP' -Dir 'TX' -UdpBw '5M' -Caps $caps -Runner $runner
         return $script:captured
       }
-
       $captured | Should -Contain '-u'
       $captured | Should -Contain '-b'
       $captured | Should -Contain '5M'
@@ -225,20 +213,45 @@ Describe 'Iperf3TestSuite helpers' {
   }
 
   Context 'Failure handling' {
+    It 'emits InputValidation ErrorId when target is missing' {
+      InModuleScope Iperf3TestSuite {
+        $err = $null
+        try { Invoke-Iperf3TestSuite -OutDir $TestDrive -Quiet } catch { $err = $_ }
+        $err | Should -Not -BeNullOrEmpty
+        $err.FullyQualifiedErrorId | Should -Match 'Iperf3TestSuite.InputValidation'
+      }
+    }
+
     It 'throws when reachability fails' {
       InModuleScope Iperf3TestSuite {
+        Mock Test-Iperf3TestSuitePrerequisites { }
         Mock Get-Command { [pscustomobject]@{ Name = $Name } }
         Mock Get-Iperf3Capability { $global:Iperf3TestSuite_TestCapability }
         Mock Test-Reachability { 'None' }
         Mock Test-TcpPortAndTrace { throw 'Should not be called' }
         Mock Invoke-Iperf3 { throw 'Should not be called' }
 
-        $global:IsWindows = $true
         Should -Throw -ActualValue { Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet } -ExpectedMessage "ICMP reachability*"
       }
     }
 
-    It 'throws on non-Windows' {
+    It 'emits Connectivity ErrorId when reachability fails' {
+      InModuleScope Iperf3TestSuite {
+        Mock Test-Iperf3TestSuitePrerequisites { }
+        Mock Get-Command { [pscustomobject]@{ Name = $Name } }
+        Mock Get-Iperf3Capability { $global:Iperf3TestSuite_TestCapability }
+        Mock Test-Reachability { 'None' }
+        Mock Test-TcpPortAndTrace { throw 'Should not be called' }
+        Mock Invoke-Iperf3 { throw 'Should not be called' }
+
+        $err = $null
+        try { Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet } catch { $err = $_ }
+        $err | Should -Not -BeNullOrEmpty
+        $err.FullyQualifiedErrorId | Should -Match 'Iperf3TestSuite.Connectivity'
+      }
+    }
+
+    It 'throws on non-Windows' -Skip:(-not $IsWindows) {
       InModuleScope Iperf3TestSuite {
         $global:IsWindows = $false
         Should -Throw -ActualValue { Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet } -ExpectedMessage "*only supported on Windows*"
@@ -247,6 +260,7 @@ Describe 'Iperf3TestSuite helpers' {
 
     It 'throws when TCP port is not reachable' {
       InModuleScope Iperf3TestSuite {
+        Mock Test-Iperf3TestSuitePrerequisites { }
         Mock Get-Command { [pscustomobject]@{ Name = $Name } }
         Mock Get-Iperf3Capability { $global:Iperf3TestSuite_TestCapability }
         Mock Test-Reachability { 'IPv4' }
@@ -258,11 +272,26 @@ Describe 'Iperf3TestSuite helpers' {
         Should -Throw -ActualValue { Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet } -ExpectedMessage "TCP port*"
       }
     }
+
+    It 'throws when SingleTest and DscpClasses is empty' {
+      InModuleScope Iperf3TestSuite {
+        Mock Test-Iperf3TestSuitePrerequisites { }
+        Mock Get-Command { [pscustomobject]@{ Name = $Name } }
+        Mock Get-Iperf3Capability { $global:Iperf3TestSuite_TestCapability }
+
+        # Parameter binding may reject empty array; otherwise our explicit check throws
+        $err = $null
+        try { Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet -SingleTest -DscpClasses @() } catch { $err = $_ }
+        $err | Should -Not -BeNullOrEmpty
+        ($err.Exception.Message -match 'at least one DSCP|empty|null') | Should -Be $true
+      }
+    }
   }
 
   Context 'UDP saturation loop' {
     It 'stops when loss exceeds threshold' {
       InModuleScope Iperf3TestSuite {
+        Mock Test-Iperf3TestSuitePrerequisites { }
         Mock Get-Command { [pscustomobject]@{ Name = $Name } }
         $script:udpBws = New-Object System.Collections.Generic.List[string]
 
@@ -307,11 +336,12 @@ Describe 'Iperf3TestSuite helpers' {
           }
 
           return [pscustomobject]@{
-            Args     = @()
-            ExitCode = 0
-            RawLines = @()
-            RawText  = ''
-            Json     = $json
+            Args           = @()
+            ExitCode       = 0
+            RawLines       = @()
+            RawText        = ''
+            Json           = $json
+            JsonParseError = $null
           }
         }
 
@@ -323,6 +353,205 @@ Describe 'Iperf3TestSuite helpers' {
         $script:udpBws.Count | Should -BeGreaterOrEqual 1
         $script:udpBws[0] | Should -Be '1M'  # Verify first bandwidth was tried
       }
+    }
+  }
+
+  Context 'SingleTest protocol filter' {
+    It 'runs exactly one UDP TX test for SingleTest + Protocol UDP' {
+      InModuleScope Iperf3TestSuite {
+        Mock Test-Iperf3TestSuitePrerequisites { }
+        Mock Get-Iperf3Capability { $global:Iperf3TestSuite_TestCapability }
+        Mock Test-Reachability { 'IPv4' }
+        Mock Test-TcpPortAndTrace {
+          [pscustomobject]@{ Tcp = [pscustomobject]@{ TcpTestSucceeded = $true; RemoteAddress = '127.0.0.1'; PingSucceeded = $true }; Trace = [pscustomobject]@{ TraceRoute = @() } }
+        }
+
+        $script:calls = New-Object System.Collections.Generic.List[object]
+        Mock Invoke-Iperf3 {
+          param(
+            [string]$Server,
+            [int]$Port,
+            [string]$Stack,
+            [int]$Duration,
+            [int]$Omit,
+            [int]$Tos,
+            [string]$Proto,
+            [string]$Dir,
+            [int]$Streams,
+            [string]$Win,
+            [string]$UdpBw,
+            [int]$ConnectTimeoutMs,
+            [pscustomobject]$Caps,
+            [scriptblock]$Runner
+          )
+          $null = $Server, $Port, $Stack, $Duration, $Omit, $Tos, $Streams, $Win, $ConnectTimeoutMs, $Caps, $Runner
+          $script:calls.Add([pscustomobject]@{ Proto = $Proto; Dir = $Dir; UdpBw = $UdpBw }) | Out-Null
+          [pscustomobject]@{
+            Args           = @()
+            ExitCode       = 0
+            RawLines       = @()
+            RawText        = ''
+            Json           = [pscustomobject]@{ end = [pscustomobject]@{ sum_sent = [pscustomobject]@{ bits_per_second = 1000000; lost_percent = 0.0 }; sum_received = [pscustomobject]@{ bits_per_second = 900000 }; sum = [pscustomobject]@{ lost_percent = 0.0; jitter_ms = 1.0 } } }
+            JsonParseError = $null
+          }
+        }
+
+        $summary = Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -Quiet -DisableMtuProbe -SingleTest -Protocol UDP -DscpClasses @('CS0') -PassThru
+        $script:calls.Count | Should -Be 1
+        $script:calls[0].Proto | Should -Be 'UDP'
+        $script:calls[0].Dir | Should -Be 'TX'
+        $summary.Counts.Total | Should -Be 1
+      }
+    }
+  }
+
+  Context 'Configuration normalization' {
+    It 'ignores unknown keys in non-strict mode' {
+      InModuleScope Iperf3TestSuite {
+        $res = ConvertTo-Iperf3NormalizedParameterSet -InputParameters @{ Port = 5201; UnknownKey = 'x' } -AllowedKeys @('Port') -StrictConfiguration:$false
+        $res.Parameters.ContainsKey('Port') | Should -Be $true
+        $res.Parameters.ContainsKey('UnknownKey') | Should -Be $false
+        @($res.Warnings).Count | Should -Be 1
+      }
+    }
+
+    It 'throws on unknown keys in strict mode' {
+      InModuleScope Iperf3TestSuite {
+        { ConvertTo-Iperf3NormalizedParameterSet -InputParameters @{ UnknownKey = 'x' } -AllowedKeys @('Port') -StrictConfiguration } | Should -Throw
+      }
+    }
+
+    It 'drops invalid range values in non-strict mode' {
+      InModuleScope Iperf3TestSuite {
+        $res = ConvertTo-Iperf3NormalizedParameterSet -InputParameters @{ Port = 70000 } -AllowedKeys @('Port') -StrictConfiguration:$false
+        $res.Parameters.ContainsKey('Port') | Should -Be $false
+        @($res.Warnings).Count | Should -Be 1
+        $res.Warnings[0] | Should -Match 'range'
+      }
+    }
+
+    It 'throws on invalid range values in strict mode' {
+      InModuleScope Iperf3TestSuite {
+        { ConvertTo-Iperf3NormalizedParameterSet -InputParameters @{ Port = 70000 } -AllowedKeys @('Port') -StrictConfiguration } | Should -Throw
+      }
+    }
+  }
+
+  Context 'Profiles' {
+    It 'saves, lists, and loads profile parameters' {
+      InModuleScope Iperf3TestSuite {
+        $profilesFile = Join-Path $TestDrive 'profiles.json'
+        $save = Save-Iperf3Profile -ProfileName 'lab' -ProfilesFile $profilesFile -Parameters @{ Target = 'example.local'; Port = 5201; Protocol = 'TCP' } -StrictConfiguration
+        $save.ProfileName | Should -Be 'lab'
+        $names = Get-Iperf3ProfileNames -ProfilesFile $profilesFile -StrictConfiguration
+        $names | Should -Contain 'lab'
+        $loaded = Get-Iperf3ProfileParameters -ProfileName 'lab' -ProfilesFile $profilesFile -StrictConfiguration
+        $loaded.Target | Should -Be 'example.local'
+        $loaded.Port | Should -Be 5201
+        $loaded.Protocol | Should -Be 'TCP'
+      }
+    }
+
+    It 'removes a saved profile' {
+      InModuleScope Iperf3TestSuite {
+        $profilesFile = Join-Path $TestDrive 'profiles-remove.json'
+        $null = Save-Iperf3Profile -ProfileName 'to-remove' -ProfilesFile $profilesFile -Parameters @{ Target = 'example.local' }
+        $removed = Remove-Iperf3Profile -ProfileName 'to-remove' -ProfilesFile $profilesFile
+        $removed | Should -Be $true
+        $names = Get-Iperf3ProfileNames -ProfilesFile $profilesFile
+        $names | Should -Not -Contain 'to-remove'
+      }
+    }
+
+    It 'creates a backup when profiles file is corrupt in non-strict mode' {
+      InModuleScope Iperf3TestSuite {
+        $profilesFile = Join-Path $TestDrive 'profiles-corrupt.json'
+        Set-Content -LiteralPath $profilesFile -Encoding UTF8 -Value '{not-json'
+        $names = Get-Iperf3ProfileNames -ProfilesFile $profilesFile
+        @($names).Count | Should -Be 0
+        $backups = @(Get-ChildItem -LiteralPath $TestDrive -Filter 'profiles-corrupt.json.corrupt.*.bak')
+        $backups.Count | Should -Be 1
+      }
+    }
+
+    It 'blocks profiles path traversal via relative path' {
+      InModuleScope Iperf3TestSuite {
+        Push-Location $TestDrive
+        try {
+          { Save-Iperf3Profile -ProfileName 'x' -ProfilesFile '../profiles.json' -Parameters @{ Target = 'example.local' } -StrictConfiguration } | Should -Throw '*must be under the current directory*'
+        }
+        finally {
+          Pop-Location
+        }
+      }
+    }
+
+    It 'lists profiles via Invoke-Iperf3TestSuite passthru mode' {
+      InModuleScope Iperf3TestSuite {
+        $profilesFile = Join-Path $TestDrive 'profiles-list.json'
+        $null = Save-Iperf3Profile -ProfileName 'a' -ProfilesFile $profilesFile -Parameters @{ Target = 'example.local' }
+        $res = Invoke-Iperf3TestSuite -ListProfiles -ProfilesFile $profilesFile -PassThru -Quiet
+        $res.Mode | Should -Be 'ListProfiles'
+        @($res.Profiles) | Should -Contain 'a'
+      }
+    }
+  }
+
+  Context 'PassThru summary and supplemental outputs' {
+    It 'returns summary and writes supplemental report files' {
+      InModuleScope Iperf3TestSuite {
+        Mock Test-Iperf3TestSuitePrerequisites { }
+        Mock Get-Iperf3Capability { $global:Iperf3TestSuite_TestCapability }
+        Mock Test-Reachability { 'IPv4' }
+        Mock Test-TcpPortAndTrace {
+          [pscustomobject]@{ Tcp = [pscustomobject]@{ TcpTestSucceeded = $true; RemoteAddress = '127.0.0.1'; PingSucceeded = $true }; Trace = [pscustomobject]@{ TraceRoute = @() } }
+        }
+        Mock Invoke-Iperf3 {
+          [pscustomobject]@{
+            Args           = @()
+            ExitCode       = 0
+            RawLines       = @()
+            RawText        = ''
+            Json           = [pscustomobject]@{ end = [pscustomobject]@{ sum_sent = [pscustomobject]@{ bits_per_second = 1000000; retransmits = 0 }; sum_received = [pscustomobject]@{ bits_per_second = 900000 } } }
+            JsonParseError = $null
+          }
+        }
+
+        $summary = Invoke-Iperf3TestSuite -Target 'example.local' -OutDir $TestDrive -DisableMtuProbe -Quiet -Protocol TCP -DscpClasses @('CS0') -TcpStreams @(1) -TcpWindows @('default') -PassThru
+        $summary.ExitCode | Should -Be 0
+        (Test-Path -LiteralPath $summary.Supplemental.SummaryJsonPath) | Should -Be $true
+        (Test-Path -LiteralPath $summary.Supplemental.ReportMdPath) | Should -Be $true
+        (Test-Path -LiteralPath $summary.Supplemental.RunIndexPath) | Should -Be $true
+      }
+    }
+  }
+
+  Context 'CLI exit code mapping' {
+    It 'returns 11 for unknown profile name' {
+      $scriptPath = Join-Path $script:RepoRoot 'iPerf3Test.ps1'
+      & pwsh -NoLogo -NoProfile -File $scriptPath -ProfileName '__does_not_exist__' -WhatIf *> $null
+      $LASTEXITCODE | Should -Be 11
+    }
+
+    It 'deletes an existing profile via CLI DeleteProfile' {
+      $scriptPath = Join-Path $script:RepoRoot 'iPerf3Test.ps1'
+      $profilesFile = Join-Path $TestDrive 'cli-delete-profiles.json'
+
+      & pwsh -NoLogo -NoProfile -File $scriptPath -Target 'example.local' -ProfilesFile $profilesFile -ProfileName 'cli-temp' -SaveProfile -WhatIf -Quiet *> $null
+      $LASTEXITCODE | Should -Be 0
+
+      & pwsh -NoLogo -NoProfile -File $scriptPath -ProfilesFile $profilesFile -DeleteProfile 'cli-temp' -Quiet *> $null
+      $LASTEXITCODE | Should -Be 0
+
+      $names = @(Get-Iperf3ProfileNames -ProfilesFile $profilesFile)
+      $names | Should -Not -Contain 'cli-temp'
+    }
+
+    It 'returns 11 when deleting a non-existing profile via CLI DeleteProfile' {
+      $scriptPath = Join-Path $script:RepoRoot 'iPerf3Test.ps1'
+      $profilesFile = Join-Path $TestDrive 'cli-delete-missing.json'
+      & pwsh -NoLogo -NoProfile -File $scriptPath -ProfilesFile $profilesFile -DeleteProfile '__missing__' -Quiet *> $null
+      $LASTEXITCODE | Should -Be 11
     }
   }
 }

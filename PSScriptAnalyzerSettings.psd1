@@ -2,10 +2,12 @@
 # - PSAvoidGlobalVars: test file uses global for InModuleScope fixture visibility.
 # - PSUseShouldProcessForStateChangingFunctions: New-* test/module helpers return in-memory objects only.
 # - PSUseSingularNouns: Get-BitsPerSecondMbps uses standard unit "Mbps"; Get-Iperf3TestSuiteDefaultParameterSet is singular.
+# - PSUseOutputTypeCorrectly: utility conversion helpers intentionally return heterogeneous scalar/array types.
 @{
   ExcludeRules = @(
     'PSAvoidGlobalVars',
     'PSUseShouldProcessForStateChangingFunctions',
-    'PSUseSingularNouns'
+    'PSUseSingularNouns',
+    'PSUseOutputTypeCorrectly'
   )
 }

@@ -6,10 +6,8 @@ labels: enhancement
 
 ## Summary
 
-## Use Case
+## Use case
 
-## Proposed Solution
+## Proposed behavior
 
-## Alternatives Considered
-
-## Additional Context
+## Alternatives considered

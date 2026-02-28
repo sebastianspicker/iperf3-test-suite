@@ -1,14 +1,21 @@
 @{
   RootModule = 'Iperf3TestSuite.psm1'
-  ModuleVersion = '0.1.0'
+  ModuleVersion = '0.3.0'
   GUID = 'c1f4c3a8-5a7f-4fd6-8ea3-1efb8e0f4b7b'
   Author = 'iperf3-test-suite'
   CompanyName = ''
   Copyright = ''
-  Description = 'iperf3 Test Suite for Windows (PowerShell). Requires Windows (ping.exe, Test-NetConnection). iperf3 test suite runner (CSV/JSON artifacts, DSCP marking, optional MTU probe).'
+  Description = 'Windows-first iperf3 Test Suite (PowerShell). Includes profile management, strict configuration validation, deterministic exit behavior, DSCP matrix tests, optional MTU probe, and additive summary/report/index outputs.'
   PowerShellVersion = '7.0'
   CompatiblePSEditions = @('Core')
-  FunctionsToExport = @('Invoke-Iperf3TestSuite', 'Get-Iperf3TestSuiteDefaultParameterSet')
+  FunctionsToExport = @(
+    'Invoke-Iperf3TestSuite',
+    'Get-Iperf3TestSuiteDefaultParameterSet',
+    'Get-Iperf3ProfileNames',
+    'Get-Iperf3ProfileParameters',
+    'Save-Iperf3Profile',
+    'Remove-Iperf3Profile'
+  )
   CmdletsToExport = @()
   VariablesToExport = @()
   AliasesToExport = @()
@@ -21,4 +28,3 @@
     }
   }
 }
-

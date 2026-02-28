@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+Runs PSScriptAnalyzer and Pester for the repository.
+.DESCRIPTION
+Installs PSScriptAnalyzer and Pester from PSGallery if missing, then runs analyzer and tests.
+If the required modules are already installed (matching version), no install is attempted.
+The script fails if modules are missing after the install attempt (no skip-install option).
+NOTE: Install-Module -Force -AllowClobber may overwrite existing Pester/PSScriptAnalyzer versions
+in CurrentUser scope. Use a dedicated environment or accept overwrite when running this script.
+#>
 [CmdletBinding()]
 param()
 
@@ -65,25 +75,37 @@ if (-not $installedModules -or ($installedModules | Where-Object { $_.Name -eq '
 
 $installedModules | Format-Table -AutoSize
 
-$repoRoot = (Resolve-Path .).Path
-if (Test-Path -LiteralPath (Join-Path $repoRoot 'scripts')) {
-    # We are in repo root
-}
-elseif ($PSScriptRoot) {
-    $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-}
+. (Join-Path $PSScriptRoot 'Get-RepoRoot.ps1')
+$repoRoot = Get-RepoRoot
 
-$modulePath = Join-Path $repoRoot 'src/Iperf3TestSuite.psd1'
-
-$analyzerResult = Invoke-ScriptAnalyzer -Path (Join-Path $repoRoot 'src/Iperf3TestSuite.psm1')
+$settingsPath = Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
+$analyzerResult = Invoke-ScriptAnalyzer -Path $repoRoot -Recurse -Settings $settingsPath
 if ($analyzerResult -and $analyzerResult.Count -gt 0) {
   $analyzerResult | Format-Table -AutoSize
   Write-Error "PSScriptAnalyzer reported $($analyzerResult.Count) finding(s)."
   exit 1
 }
 
-$pesterResult = Invoke-Pester -Path $repoRoot -Output Detailed -CI -PassThru
+$pesterOutputDir = Join-Path $repoRoot 'artifacts'
+if (-not (Test-Path -LiteralPath $pesterOutputDir -PathType Container)) {
+  $null = New-Item -ItemType Directory -Path $pesterOutputDir -Force
+}
+$pesterResultPath = Join-Path $pesterOutputDir 'testResults.xml'
+
+$pesterConfiguration = [PesterConfiguration]::Default
+$pesterConfiguration.Run.Path = $repoRoot
+$pesterConfiguration.Run.Exit = $false
+$pesterConfiguration.Run.PassThru = $true
+$pesterConfiguration.Output.Verbosity = 'Detailed'
+$pesterConfiguration.TestResult.Enabled = $true
+$pesterConfiguration.TestResult.OutputFormat = 'NUnitXml'
+$pesterConfiguration.TestResult.OutputPath = $pesterResultPath
+$pesterConfiguration.Should.ErrorAction = 'Stop'
+
+$pesterResult = Invoke-Pester -Configuration $pesterConfiguration
 if (-not $pesterResult -or $pesterResult.FailedCount -gt 0) {
   Write-Error "Pester reported $($pesterResult.FailedCount) failed test(s)."
   exit 1
 }
+
+& (Join-Path $repoRoot 'scripts/Invoke-SecretScan.ps1') -Path $repoRoot

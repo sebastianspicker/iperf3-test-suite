@@ -36,13 +36,18 @@ node_modules/
 dist/
 .terraform/
 
-# Output artifacts (narrow patterns so repo can track config/fixtures/schemas)
+# Output artifacts (narrow patterns only; config/fixtures/schemas in repo root are not ignored)
 logs/
 logs/*.csv
 logs/*.json
+.iperf3/
 *.log
 *.nupkg
+iperf3_summary_*.csv
+iperf3_results_*.json
+iperf3_summary_*.json
+iperf3_report_*.md
+iperf3_run_index.json
 
-# Local / scratch docs and tooling (do not commit)
-.vscode
+# Local / scratch (do not commit)
 # .codex/ is local-only; remove from ignore if repo content lives there
