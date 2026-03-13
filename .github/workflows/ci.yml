@@ -28,7 +28,14 @@ jobs:
       PSSCRIPTANALYZER_VERSION: '1.24.0'
       PESTER_VERSION: '5.7.1'
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Resolve PowerShell module cache
         id: psmodules

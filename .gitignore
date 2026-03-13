@@ -49,5 +49,20 @@ iperf3_summary_*.json
 iperf3_report_*.md
 iperf3_run_index.json
 
+# Secrets & credentials (never commit)
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials.json
+service-account*.json
+*-credentials.json
+secrets.yml
+secrets.yaml
+
 # Local / scratch (do not commit)
 # .codex/ is local-only; remove from ignore if repo content lives there

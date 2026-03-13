@@ -14,20 +14,36 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $patterns = @(
-  '-----BEGIN (RSA|DSA|EC|OPENSSH) PRIVATE KEY-----',
+  '-----BEGIN (RSA|DSA|EC|OPENSSH|PGP|ENCRYPTED) PRIVATE KEY-----',
   'AKIA[0-9A-Z]{16}',
   'ASIA[0-9A-Z]{16}',
   'ghp_[A-Za-z0-9]{36}',
+  'gho_[A-Za-z0-9]{36}',
+  'ghu_[A-Za-z0-9]{36}',
+  'ghs_[A-Za-z0-9]{36}',
+  'ghr_[A-Za-z0-9]{36}',
   'github_pat_[A-Za-z0-9_]{22,}',
-  'xox[baprs]-[A-Za-z0-9-]{10,48}'
+  'xox[baprs]-[A-Za-z0-9-]{10,48}',
+  'sk-[A-Za-z0-9]{20,}',
+  'AIza[A-Za-z0-9_\\-]{35}',
+  'eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}',
+  'npm_[A-Za-z0-9]{36}',
+  'pypi-[A-Za-z0-9]{60,}',
+  'SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}',
+  'sk_live_[A-Za-z0-9]{24,}',
+  'rk_live_[A-Za-z0-9]{24,}'
 )
 
 $hitCount = 0
+$selfName = [System.IO.Path]::GetFileName($MyInvocation.MyCommand.Path)
+$binaryExts = @('.exe','.dll','.zip','.gz','.tar','.png','.jpg','.gif','.ico','.woff','.woff2','.ttf','.eot','.pdf')
 $files = Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue |
   Where-Object {
     $full = $_.FullName
     $parts = $full.Split([IO.Path]::DirectorySeparatorChar)
-    $parts -notcontains '.git'
+    $parts -notcontains '.git' -and
+      $_.Name -ne $selfName -and
+      $_.Extension -notin $binaryExts
   }
 
 foreach ($pattern in $patterns) {
